@@ -27,9 +27,23 @@ class UnifiClient:
         )
         if resp.status_code != 200:
             raise UnifiAPIError(f"Login failed ({resp.status_code}): {resp.text}")
+
+        # Extract CSRF token — required for mutating requests
         csrf = resp.headers.get("X-CSRF-Token") or resp.cookies.get("csrf_token")
         if csrf:
             self.session.headers["X-CSRF-Token"] = csrf
+
+        # The integration API lives at a different path from the auth endpoint,
+        # so the session cookie jar may not send the TOKEN cookie automatically.
+        # Explicitly set it as a Cookie header to guarantee it is sent everywhere.
+        token = resp.cookies.get("TOKEN")
+        if token:
+            self.session.headers["Cookie"] = f"TOKEN={token}"
+        elif not csrf:
+            raise UnifiAPIError(
+                "Login succeeded but no TOKEN cookie or CSRF token was returned. "
+                "Check that you are using a local admin account, not SSO."
+            )
 
     def logout(self) -> None:
         try:
