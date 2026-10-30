@@ -10,7 +10,7 @@
 
 **Please do not open a public GitHub issue for security vulnerabilities.**
 
-To report a vulnerability, please e-mail the maintainers directly at the address listed in the repository's contact information, or use GitHub's private [Security Advisories](https://docs.github.com/en/code-security/security-advisories/guidance-on-reporting-and-writing/privately-reporting-a-security-vulnerability) feature.
+To report a vulnerability, please use GitHub's private [Security Advisories](https://github.com/disappointingsupernova/Unifi-Rules-to-All-Private-Zones/security/advisories/new) feature for this repository.
 
 Please include:
 

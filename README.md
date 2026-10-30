@@ -1,4 +1,6 @@
-# UniFi Zone Firewall Rule Manager
+# Unifi-Rules-to-All-Private-Zones
+
+> **GitHub:** [disappointingsupernova/Unifi-Rules-to-All-Private-Zones](https://github.com/disappointingsupernova/Unifi-Rules-to-All-Private-Zones)
 
 Push firewall policies across multiple zones on a UDM Pro / UniFi Network Application (v10.x+) using the official Integration API.
 

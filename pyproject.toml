@@ -3,12 +3,18 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.backends.legacy:build"
 
 [project]
-name = "unifi-zone-manager"
+name = "unifi-rules-to-all-private-zones"
 version = "0.1.0"
 description = "Push firewall policies across multiple zones on a UDM Pro via the UniFi Integration API."
 readme = "README.md"
 license = { file = "LICENSE" }
 requires-python = ">=3.11"
+
+[project.urls]
+Homepage = "https://github.com/disappointingsupernova/Unifi-Rules-to-All-Private-Zones"
+Repository = "https://github.com/disappointingsupernova/Unifi-Rules-to-All-Private-Zones"
+Issues = "https://github.com/disappointingsupernova/Unifi-Rules-to-All-Private-Zones/issues"
+Changelog = "https://github.com/disappointingsupernova/Unifi-Rules-to-All-Private-Zones/blob/main/CHANGELOG.md"
 dependencies = [
     "requests>=2.31.0",
     "urllib3>=2.0.0",

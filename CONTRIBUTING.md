@@ -5,8 +5,8 @@ Thank you for considering a contribution to this project. Please read this guide
 ## Development Setup
 
 ```bash
-git clone https://github.com/your-org/unifi-zone-manager.git
-cd unifi-zone-manager
+git clone https://github.com/disappointingsupernova/Unifi-Rules-to-All-Private-Zones.git
+cd Unifi-Rules-to-All-Private-Zones
 python -m venv .venv
 source .venv/bin/activate        # Windows: .venv\Scripts\activate
 pip install -e ".[dev]"

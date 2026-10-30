@@ -24,6 +24,6 @@ Examples of unacceptable behaviour:
 
 ## Enforcement
 
-Instances of abusive, harassing, or otherwise unacceptable behaviour may be reported by contacting the project maintainers. All complaints will be reviewed and investigated and will result in a response deemed necessary and appropriate to the circumstances.
+Instances of abusive, harassing, or otherwise unacceptable behaviour may be reported by opening a private discussion or contacting the maintainers via [GitHub](https://github.com/disappointingsupernova/Unifi-Rules-to-All-Private-Zones). All complaints will be reviewed and investigated and will result in a response deemed necessary and appropriate to the circumstances.
 
 This Code of Conduct is adapted from the [Contributor Covenant](https://www.contributor-covenant.org), version 2.1.

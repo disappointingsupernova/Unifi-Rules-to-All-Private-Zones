@@ -1,5 +1,7 @@
 # Architecture
 
+**Repository:** [disappointingsupernova/Unifi-Rules-to-All-Private-Zones](https://github.com/disappointingsupernova/Unifi-Rules-to-All-Private-Zones)
+
 This document describes the structure, data flow, and component relationships of the UniFi Zone Firewall Rule Manager.
 
 ---
