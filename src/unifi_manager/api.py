@@ -28,22 +28,38 @@ class UnifiClient:
         if resp.status_code != 200:
             raise UnifiAPIError(f"Login failed ({resp.status_code}): {resp.text}")
 
-        # Extract CSRF token — required for mutating requests
-        csrf = resp.headers.get("X-CSRF-Token") or resp.cookies.get("csrf_token")
-        if csrf:
-            self.session.headers["X-CSRF-Token"] = csrf
+        # Extract TOKEN from Set-Cookie header directly — more reliable than
+        # the cookie jar when the cookie carries partitioned/httponly flags
+        # or when the client IP differs from the expected domain (e.g. WSL).
+        token = None
+        for header_val in resp.headers.getlist("Set-Cookie"):
+            for part in header_val.split(";"):
+                part = part.strip()
+                if part.startswith("TOKEN="):
+                    token = part[len("TOKEN="):]
+                    break
+            if token:
+                break
 
-        # The integration API lives at a different path from the auth endpoint,
-        # so the session cookie jar may not send the TOKEN cookie automatically.
-        # Explicitly set it as a Cookie header to guarantee it is sent everywhere.
-        token = resp.cookies.get("TOKEN")
-        if token:
-            self.session.headers["Cookie"] = f"TOKEN={token}"
-        elif not csrf:
+        # Fall back to the cookie jar if header parsing found nothing
+        if not token:
+            token = resp.cookies.get("TOKEN")
+
+        if not token:
             raise UnifiAPIError(
-                "Login succeeded but no TOKEN cookie or CSRF token was returned. "
-                "Check that you are using a local admin account, not SSO."
+                "Login succeeded but no TOKEN cookie was returned. "
+                "Ensure you are using a local admin account, not a UI SSO account."
             )
+
+        # Set TOKEN as an explicit Cookie header so it is sent to every path,
+        # including /proxy/network/integration which has a different path scope.
+        self.session.headers["Cookie"] = f"TOKEN={token}"
+
+        # X-Csrf-Token is returned as a response header and must be sent on
+        # all mutating requests (POST, PUT, PATCH, DELETE).
+        csrf = resp.headers.get("X-Csrf-Token") or resp.headers.get("X-CSRF-Token")
+        if csrf:
+            self.session.headers["X-Csrf-Token"] = csrf
 
     def logout(self) -> None:
         try:
