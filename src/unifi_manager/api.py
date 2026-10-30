@@ -28,24 +28,22 @@ class UnifiClient:
         if resp.status_code != 200:
             raise UnifiAPIError(f"Login failed ({resp.status_code}): {resp.text}")
 
-        # Extract TOKEN from Set-Cookie headers directly — more reliable than
-        # the cookie jar when the cookie carries partitioned/httponly flags
-        # or when the client is running from a different network namespace (WSL).
-        # requests uses CaseInsensitiveDict which does not support getlist, so
-        # iterate the raw urllib3 headers to capture all Set-Cookie values.
-        token = None
-        raw_headers = resp.raw.headers.getlist("Set-Cookie") if hasattr(resp.raw.headers, "getlist") else [resp.raw.headers.get("Set-Cookie", "")]
-        for header_val in raw_headers:
-            for part in header_val.split(";"):
-                if part.strip().startswith("TOKEN="):
-                    token = part.strip()[len("TOKEN="):]
-                    break
-            if token:
-                break
-
-        # Fall back to the cookie jar if raw header parsing found nothing
+        # Extract TOKEN — try cookie jar first (works in most environments),
+        # then fall back to parsing the raw Set-Cookie header string.
+        token = resp.cookies.get("TOKEN")
         if not token:
-            token = resp.cookies.get("TOKEN")
+            raw_headers = (
+                resp.raw.headers.getlist("Set-Cookie")
+                if hasattr(resp.raw.headers, "getlist")
+                else [resp.raw.headers.get("Set-Cookie", "")]
+            )
+            for header_val in raw_headers:
+                for part in header_val.split(";"):
+                    if part.strip().startswith("TOKEN="):
+                        token = part.strip()[len("TOKEN="):]
+                        break
+                if token:
+                    break
 
         if not token:
             raise UnifiAPIError(
@@ -53,12 +51,12 @@ class UnifiClient:
                 "Ensure you are using a local admin account, not a UI SSO account."
             )
 
-        # Set TOKEN as an explicit Cookie header so it is sent to every path,
-        # including /proxy/network/integration which has a different path scope.
-        self.session.headers["Cookie"] = f"TOKEN={token}"
+        # Set the TOKEN cookie directly on the session cookie jar with a
+        # wildcard domain so requests sends it to every host/path, including
+        # /proxy/network/integration which differs from the /api/auth path.
+        self.session.cookies.set("TOKEN", token, domain="", path="/")
 
-        # X-Csrf-Token is returned as a response header and must be sent on
-        # all mutating requests (POST, PUT, PATCH, DELETE).
+        # X-Csrf-Token must accompany all mutating requests.
         csrf = resp.headers.get("X-Csrf-Token") or resp.headers.get("X-CSRF-Token")
         if csrf:
             self.session.headers["X-Csrf-Token"] = csrf
