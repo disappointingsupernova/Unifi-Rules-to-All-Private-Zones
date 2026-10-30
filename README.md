@@ -12,7 +12,7 @@ Push firewall policies across multiple zones on a UDM Pro / UniFi Network Applic
 - Zone clusters — group zones by name and select them as a unit
 - Full site config backup with optional AES-256-GCM encryption
 - Decrypt encrypted backups
-- Credentials are never stored — prompted each session
+- Credentials are never stored — API key saved to OS keychain only if you opt in
 
 ## Requirements
 
@@ -28,9 +28,9 @@ pip install -r requirements.txt
 cp clusters.example.yaml clusters.yaml
 ```
 
-Edit `clusters.yaml` with your controller IP, username, and any zone clusters. This file is listed in `.gitignore` and will never be committed.
+Edit `clusters.yaml` with your controller IP and any zone clusters. This file is listed in `.gitignore` and will never be committed. It is also created automatically from the example on first run.
 
-Alternatively, `clusters.yaml` is created automatically from the example on first run — you can then edit it and re-run.
+The API key is **never written to disk**. On first use you will be offered the option to save it to your OS keychain (Windows Credential Manager, macOS Keychain, or Linux libsecret) so it is not re-entered every session. Use **Forget stored API key** from the main menu to remove it at any time.
 
 ## Usage
 
@@ -38,7 +38,7 @@ Alternatively, `clusters.yaml` is created automatically from the example on firs
 python main.py
 ```
 
-You will be prompted for your controller IP, username, and password each time.
+You will be prompted for your controller IP and API key. The API key is created in the UniFi UI at **Settings → Control Plane → Integrations**.
 
 ## Zone Clusters
 
@@ -63,4 +63,4 @@ To decrypt: run the tool and choose **Decrypt a backup file** from the opening m
 
 - The tool uses the `/proxy/network/integration` API (the official v1 Integration API), not the legacy `api/s/default` endpoints, except for backup which uses the legacy backup command.
 - SSL verification is disabled for self-signed certs on local UDMs.
-- `clusters.yaml` is listed in `.gitignore` — it contains your controller IP and username but no passwords. `clusters.example.yaml` is the committed template.
+- `clusters.yaml` is listed in `.gitignore` — it contains your controller IP but no credentials. `clusters.example.yaml` is the committed template.

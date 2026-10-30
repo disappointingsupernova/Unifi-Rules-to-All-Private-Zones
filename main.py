@@ -24,6 +24,10 @@ from src.unifi_manager.api import UnifiClient, UnifiAPIError
 from src.unifi_manager.config import (
     load_controller_defaults,
     save_controller_defaults,
+    load_api_key,
+    save_api_key,
+    delete_api_key,
+    keyring_available,
 )
 from src.unifi_manager.ui.flows import (
     select_site,
@@ -39,20 +43,45 @@ console = Console()
 
 
 def prompt_connection() -> tuple[str, str]:
-    """Prompt for host and API key only."""
+    """Prompt for host and API key, pre-populating from keychain if available."""
     defaults = load_controller_defaults()
-
     host = questionary.text(
         "UDM/Controller IP or hostname:",
         default=defaults["host"],
     ).ask()
-    api_key = getpass.getpass("API key (Settings → Control Plane → Integrations): ")
+    if not host:
+        console.print("[red]Cancelled.[/red]")
+        sys.exit(0)
+    host = host.strip()
 
-    if not host or not api_key:
+    # Try to load API key from OS keychain
+    stored_key = load_api_key(host)
+    if stored_key:
+        console.print("[dim]API key loaded from system keychain.[/dim]")
+        use_stored = questionary.confirm(
+            "Use stored API key?", default=True
+        ).ask()
+        if use_stored:
+            return host, stored_key
+
+    api_key = getpass.getpass("API key (Settings → Control Plane → Integrations): ")
+    if not api_key:
         console.print("[red]Cancelled.[/red]")
         sys.exit(0)
 
-    return host.strip(), api_key.strip()
+    # Offer to save to keychain
+    if keyring_available():
+        if questionary.confirm(
+            "Save API key to system keychain? (never written to disk)", default=True
+        ).ask():
+            save_api_key(host, api_key.strip())
+            console.print("[dim]API key saved to system keychain.[/dim]")
+    else:
+        console.print(
+            "[dim]Install 'keyring' to save the API key securely between sessions.[/dim]"
+        )
+
+    return host, api_key.strip()
 
 
 def main() -> None:
@@ -114,6 +143,7 @@ def main() -> None:
                     "Manage port lists",
                     "Backup site config",
                     "Manage zone clusters",
+                    "Forget stored API key",
                     "Exit",
                 ],
             ).ask()
@@ -142,6 +172,9 @@ def main() -> None:
                         console.print(f"[red]Backup login failed: {e}[/red]")
             elif action == "Manage zone clusters":
                 flow_manage_clusters(zones)
+            elif action == "Forget stored API key":
+                delete_api_key(host)
+                console.print("[green]Stored API key removed from system keychain.[/green]")
             elif action == "Exit":
                 break
 

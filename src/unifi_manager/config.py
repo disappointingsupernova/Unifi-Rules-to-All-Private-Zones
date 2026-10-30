@@ -4,9 +4,17 @@ import shutil
 import yaml
 from pathlib import Path
 
+try:
+    import keyring
+    _KEYRING_AVAILABLE = True
+except ImportError:
+    _KEYRING_AVAILABLE = False
+
 # clusters.yaml lives at the repo root, two levels above this file
 CONFIG_PATH = Path(__file__).parent.parent.parent / "clusters.yaml"
 EXAMPLE_PATH = CONFIG_PATH.parent / "clusters.example.yaml"
+
+_KEYRING_SERVICE = "unifi-zone-manager"
 
 
 def _ensure_config() -> None:
@@ -60,3 +68,34 @@ def save_clusters(clusters: dict[str, list[str]]) -> None:
     existing["clusters"] = clusters
     with open(CONFIG_PATH, "w") as f:
         yaml.dump(existing, f, default_flow_style=False, sort_keys=True)
+
+
+def keyring_available() -> bool:
+    return _KEYRING_AVAILABLE
+
+
+def load_api_key(host: str) -> str | None:
+    """Retrieve the API key for a given host from the OS keychain."""
+    if not _KEYRING_AVAILABLE:
+        return None
+    try:
+        return keyring.get_password(_KEYRING_SERVICE, host)
+    except Exception:
+        return None
+
+
+def save_api_key(host: str, api_key: str) -> None:
+    """Store the API key for a given host in the OS keychain."""
+    if not _KEYRING_AVAILABLE:
+        return
+    keyring.set_password(_KEYRING_SERVICE, host, api_key)
+
+
+def delete_api_key(host: str) -> None:
+    """Remove the stored API key for a given host from the OS keychain."""
+    if not _KEYRING_AVAILABLE:
+        return
+    try:
+        keyring.delete_password(_KEYRING_SERVICE, host)
+    except Exception:
+        pass

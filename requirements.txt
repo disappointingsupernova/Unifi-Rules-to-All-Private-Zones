@@ -4,3 +4,4 @@ questionary>=2.0.1
 rich>=13.7.0
 pyyaml>=6.0.1
 cryptography>=42.0.0
+keyring>=25.0.0
