@@ -10,9 +10,9 @@ from rich.panel import Panel
 from rich.rule import Rule
 from rich.table import Table
 
-from unifi_manager.api import UnifiClient, UnifiAPIError
-from unifi_manager.config import load_clusters, save_clusters
-from unifi_manager.crypto import decrypt_backup, encrypt_backup
+from src.unifi_manager.api import UnifiClient, UnifiAPIError
+from src.unifi_manager.config import load_clusters, save_clusters
+from src.unifi_manager.crypto import decrypt_backup, encrypt_backup
 
 console = Console()
 
