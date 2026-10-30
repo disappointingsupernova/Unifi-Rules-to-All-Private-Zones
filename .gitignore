@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+dist/
+build/
+coverage.xml
+.coverage
+htmlcov/
+
+# Backups — never commit these
+*.unf
+*.unf.enc
+
+# Secrets / local overrides
+.env
+*.local.yaml
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db

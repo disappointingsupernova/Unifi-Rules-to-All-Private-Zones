@@ -1,0 +1,19 @@
+# clusters.yaml — Zone cluster definitions
+# Group your firewall zones into named clusters for easy multi-zone rule creation.
+# Zone names must match exactly what appears in your UniFi controller.
+# No credentials are stored here.
+
+clusters:
+  Internal:
+    - LAN
+    - IoT
+    - Servers
+    - Management
+
+  Web Apps:
+    - Web Servers
+    - MySQL
+
+  Trusted:
+    - LAN
+    - Management
