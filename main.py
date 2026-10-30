@@ -13,8 +13,10 @@ The legacy backup endpoint still uses session-cookie auth, so username
 and password are only prompted when performing a backup.
 """
 
-import sys
+import ctypes
 import getpass
+import signal
+import sys
 
 import questionary
 from rich.console import Console
@@ -22,24 +24,56 @@ from rich.panel import Panel
 
 from src.unifi_manager.api import UnifiClient, UnifiAPIError
 from src.unifi_manager.config import (
-    load_controller_defaults,
-    save_controller_defaults,
-    load_api_key,
-    save_api_key,
     delete_api_key,
     keyring_available,
+    load_api_key,
+    load_controller_defaults,
+    save_api_key,
+    save_controller_defaults,
 )
 from src.unifi_manager.ui.flows import (
-    select_site,
-    flow_create_rules,
-    flow_list_policies,
-    flow_manage_port_lists,
     flow_backup,
+    flow_create_rules,
     flow_decrypt_backup,
+    flow_list_policies,
     flow_manage_clusters,
+    flow_manage_port_lists,
 )
 
 console = Console()
+
+# Module-level reference so signal handlers can reach the client
+_client: UnifiClient | None = None
+
+
+def _zero_string(s: str) -> None:
+    """Best-effort overwrite of a string's internal buffer in CPython.
+
+    Python strings are immutable and interned, so this is not guaranteed,
+    but it reduces the window during which a secret sits in readable memory.
+    """
+    try:
+        buf = (ctypes.c_char * len(s)).from_address(id(s) + object.__basicsize__)  # type: ignore[attr-defined]
+        buf[:] = b"\x00" * len(s)
+    except Exception:
+        pass
+
+
+def _shutdown(signum: int, frame: object) -> None:
+    """Graceful shutdown on SIGTERM / SIGHUP — mirrors the finally block."""
+    console.print(f"\n[dim]Signal {signum} received — shutting down.[/dim]")
+    if _client is not None:
+        _client.logout()
+    sys.exit(0)
+
+
+# Register signal handlers so SIGTERM and SIGHUP trigger clean logout.
+# SIGINT (Ctrl-C) is handled by the KeyboardInterrupt except clause.
+for _sig in (signal.SIGTERM,):
+    signal.signal(_sig, _shutdown)
+# SIGHUP is Unix-only
+if hasattr(signal, "SIGHUP"):
+    signal.signal(signal.SIGHUP, _shutdown)  # type: ignore[attr-defined]
 
 
 def prompt_connection() -> tuple[str, str]:
@@ -58,10 +92,7 @@ def prompt_connection() -> tuple[str, str]:
     stored_key = load_api_key(host)
     if stored_key:
         console.print("[dim]API key loaded from system keychain.[/dim]")
-        use_stored = questionary.confirm(
-            "Use stored API key?", default=True
-        ).ask()
-        if use_stored:
+        if questionary.confirm("Use stored API key?", default=True).ask():
             return host, stored_key
 
     api_key = getpass.getpass("API key (Settings → Control Plane → Integrations): ")
@@ -69,7 +100,6 @@ def prompt_connection() -> tuple[str, str]:
         console.print("[red]Cancelled.[/red]")
         sys.exit(0)
 
-    # Offer to save to keychain
     if keyring_available():
         if questionary.confirm(
             "Save API key to system keychain? (never written to disk)", default=True
@@ -85,6 +115,8 @@ def prompt_connection() -> tuple[str, str]:
 
 
 def main() -> None:
+    global _client
+
     console.print(Panel("[bold cyan]UniFi Zone Firewall Rule Manager[/bold cyan]", expand=False))
 
     standalone = questionary.select(
@@ -100,17 +132,22 @@ def main() -> None:
 
     host, api_key = prompt_connection()
 
-    client = UnifiClient(host)
+    # Initialise client before the try block so the finally reference is safe
+    _client = UnifiClient(host)
+
     try:
-        client.set_api_key(api_key)
+        _client.set_api_key(api_key)
+        _zero_string(api_key)  # Zero the local copy — keychain holds the canonical one
 
         with console.status("Connecting..."):
-            sites = client.get_sites()
+            sites = _client.get_sites()
         if not sites:
-            raise UnifiAPIError("No sites returned — check your API key and controller address.")
+            raise UnifiAPIError(
+                "No sites returned — check your API key and controller address."
+            )
         console.print("[green]✓ Connected.[/green]")
 
-        # Offer to save host as default (API key is never stored)
+        # Offer to save host as default (API key is never stored in clusters.yaml)
         defaults = load_controller_defaults()
         if host != defaults["host"]:
             if questionary.confirm(
@@ -127,10 +164,10 @@ def main() -> None:
             choices = [f"{s['name']}  ({s['id']})" for s in sites]
             choice = questionary.select("Select site:", choices=choices).ask()
             site_id = sites[choices.index(choice)]["id"]
-        client.set_site(site_id)
+        _client.set_site(site_id)
 
         with console.status("Fetching zones..."):
-            zones = client.get_zones()
+            zones = _client.get_zones()
         console.print(f"[dim]Found {len(zones)} zones.[/dim]")
 
         while True:
@@ -149,16 +186,15 @@ def main() -> None:
             ).ask()
 
             if action == "Create firewall rules across zones":
-                flow_create_rules(client)
+                flow_create_rules(_client)
             elif action == "List existing policies":
-                flow_list_policies(client)
+                flow_list_policies(_client)
             elif action == "Manage port lists":
-                flow_manage_port_lists(client)
+                flow_manage_port_lists(_client)
             elif action == "Backup site config":
-                # Backup uses the legacy endpoint which needs session auth
                 console.print(
                     "[dim]Backup requires your username and password "
-                    "(session auth, not API key).[/dim]"
+                    "(session auth, separate from the API key).[/dim]"
                 )
                 username = questionary.text(
                     "Username:", default=defaults.get("username", "")
@@ -166,10 +202,12 @@ def main() -> None:
                 password = getpass.getpass("Password: ")
                 if username and password:
                     try:
-                        client.login_for_backup(username, password)
-                        flow_backup(client)
+                        _client.login_for_backup(username, password)
+                        flow_backup(_client)
                     except UnifiAPIError as e:
                         console.print(f"[red]Backup login failed: {e}[/red]")
+                    finally:
+                        _zero_string(password)  # Zero password immediately after use
             elif action == "Manage zone clusters":
                 flow_manage_clusters(zones)
             elif action == "Forget stored API key":
@@ -183,7 +221,8 @@ def main() -> None:
     except KeyboardInterrupt:
         console.print("\n[dim]Interrupted.[/dim]")
     finally:
-        client.logout()
+        # _client is guaranteed to exist here — it was assigned before the try block
+        _client.logout()
         console.print("[dim]Done.[/dim]")
 
 
