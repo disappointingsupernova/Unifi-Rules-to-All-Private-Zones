@@ -19,6 +19,7 @@ Push firewall policies across multiple zones on a UDM Pro / UniFi Network Applic
 - Python 3.11+
 - UDM Pro running UniFi Network Application 10.x with zone-based firewall enabled
 - A local admin account (not SSO)
+- An API key — create one at **Settings → Control Plane → Integrations**
 
 ## Setup
 

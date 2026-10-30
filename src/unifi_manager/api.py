@@ -1,4 +1,12 @@
-"""UniFi Network API client for local UDM/controller access."""
+"""UniFi Network API client for local UDM/controller access.
+
+The Integration API (/proxy/network/integration) requires an API key
+passed as the X-API-KEY request header. API keys are created in the
+UniFi UI under Settings → Control Plane → Integrations.
+
+The legacy backup endpoint (/proxy/network/api/s/default/cmd/backup)
+still requires session-cookie auth via /api/auth/login.
+"""
 
 import requests
 import urllib3
@@ -19,7 +27,12 @@ class UnifiClient:
         self.session.verify = False
         self.site_id: Optional[str] = None
 
-    def login(self, username: str, password: str) -> None:
+    def set_api_key(self, api_key: str) -> None:
+        """Configure the integration API key (X-API-KEY header)."""
+        self.session.headers["X-API-KEY"] = api_key.strip()
+
+    def login_for_backup(self, username: str, password: str) -> None:
+        """Authenticate via session cookie — only needed for the backup endpoint."""
         resp = self.session.post(
             f"{self.base}/api/auth/login",
             json={"username": username, "password": password},
@@ -28,8 +41,6 @@ class UnifiClient:
         if resp.status_code != 200:
             raise UnifiAPIError(f"Login failed ({resp.status_code}): {resp.text}")
 
-        # Extract TOKEN — try cookie jar first (works in most environments),
-        # then fall back to parsing the raw Set-Cookie header string.
         token = resp.cookies.get("TOKEN")
         if not token:
             raw_headers = (
@@ -47,16 +58,11 @@ class UnifiClient:
 
         if not token:
             raise UnifiAPIError(
-                "Login succeeded but no TOKEN cookie was returned. "
+                "Login failed — no TOKEN cookie returned. "
                 "Ensure you are using a local admin account, not a UI SSO account."
             )
 
-        # Set the TOKEN cookie directly on the session cookie jar with a
-        # wildcard domain so requests sends it to every host/path, including
-        # /proxy/network/integration which differs from the /api/auth path.
         self.session.cookies.set("TOKEN", token, domain="", path="/")
-
-        # X-Csrf-Token must accompany all mutating requests.
         csrf = resp.headers.get("X-Csrf-Token") or resp.headers.get("X-CSRF-Token")
         if csrf:
             self.session.headers["X-Csrf-Token"] = csrf
@@ -125,7 +131,7 @@ class UnifiClient:
             )
 
     def backup_site(self) -> bytes:
-        """Download full site config backup via the legacy backup endpoint."""
+        """Download full site config backup via the legacy session-auth endpoint."""
         resp = self.session.post(
             f"{self.base}/proxy/network/api/s/default/cmd/backup",
             json={"cmd": "backup", "days": -1},

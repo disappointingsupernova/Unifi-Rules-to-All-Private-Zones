@@ -3,6 +3,14 @@ UniFi Zone Firewall Rule Manager — entry point.
 
 Run with:
     python main.py
+
+Authentication
+--------------
+The Integration API (/proxy/network/integration) requires an API key.
+Create one in the UniFi UI: Settings → Control Plane → Integrations.
+
+The legacy backup endpoint still uses session-cookie auth, so username
+and password are only prompted when performing a backup.
 """
 
 import sys
@@ -30,24 +38,21 @@ from src.unifi_manager.ui.flows import (
 console = Console()
 
 
-def prompt_credentials() -> tuple[str, str, str]:
+def prompt_connection() -> tuple[str, str]:
+    """Prompt for host and API key only."""
     defaults = load_controller_defaults()
 
-    host_prompt = questionary.text(
+    host = questionary.text(
         "UDM/Controller IP or hostname:",
         default=defaults["host"],
     ).ask()
-    username_prompt = questionary.text(
-        "Username:",
-        default=defaults["username"],
-    ).ask()
-    password = getpass.getpass("Password: ")
+    api_key = getpass.getpass("API key (Settings → Control Plane → Integrations): ")
 
-    if not host_prompt or not username_prompt or not password:
+    if not host or not api_key:
         console.print("[red]Cancelled.[/red]")
         sys.exit(0)
 
-    return host_prompt.strip(), username_prompt.strip(), password
+    return host.strip(), api_key.strip()
 
 
 def main() -> None:
@@ -64,24 +69,35 @@ def main() -> None:
     if standalone == "Exit":
         return
 
-    host, username, password = prompt_credentials()
+    host, api_key = prompt_connection()
 
     client = UnifiClient(host)
     try:
-        with console.status("Logging in..."):
-            client.login(username, password)
-        console.print("[green]✓ Logged in.[/green]")
+        client.set_api_key(api_key)
 
-        # Offer to save host/username as defaults (never the password)
+        with console.status("Connecting..."):
+            sites = client.get_sites()
+        if not sites:
+            raise UnifiAPIError("No sites returned — check your API key and controller address.")
+        console.print("[green]✓ Connected.[/green]")
+
+        # Offer to save host as default (API key is never stored)
         defaults = load_controller_defaults()
-        if host != defaults["host"] or username != defaults["username"]:
+        if host != defaults["host"]:
             if questionary.confirm(
-                "Save host and username as defaults in clusters.yaml?", default=True
+                "Save host as default in clusters.yaml?", default=True
             ).ask():
-                save_controller_defaults(host, username)
-                console.print("[dim]Defaults saved to clusters.yaml.[/dim]")
+                save_controller_defaults(host, defaults.get("username", ""))
+                console.print("[dim]Host saved to clusters.yaml.[/dim]")
 
-        site_id = select_site(client)
+        # Site selection
+        if len(sites) == 1:
+            console.print(f"[dim]Using site: {sites[0]['name']}[/dim]")
+            site_id = sites[0]["id"]
+        else:
+            choices = [f"{s['name']}  ({s['id']})" for s in sites]
+            choice = questionary.select("Select site:", choices=choices).ask()
+            site_id = sites[choices.index(choice)]["id"]
         client.set_site(site_id)
 
         with console.status("Fetching zones..."):
@@ -109,7 +125,21 @@ def main() -> None:
             elif action == "Manage port lists":
                 flow_manage_port_lists(client)
             elif action == "Backup site config":
-                flow_backup(client)
+                # Backup uses the legacy endpoint which needs session auth
+                console.print(
+                    "[dim]Backup requires your username and password "
+                    "(session auth, not API key).[/dim]"
+                )
+                username = questionary.text(
+                    "Username:", default=defaults.get("username", "")
+                ).ask()
+                password = getpass.getpass("Password: ")
+                if username and password:
+                    try:
+                        client.login_for_backup(username, password)
+                        flow_backup(client)
+                    except UnifiAPIError as e:
+                        console.print(f"[red]Backup login failed: {e}[/red]")
             elif action == "Manage zone clusters":
                 flow_manage_clusters(zones)
             elif action == "Exit":
@@ -121,7 +151,7 @@ def main() -> None:
         console.print("\n[dim]Interrupted.[/dim]")
     finally:
         client.logout()
-        console.print("[dim]Logged out.[/dim]")
+        console.print("[dim]Done.[/dim]")
 
 
 if __name__ == "__main__":
