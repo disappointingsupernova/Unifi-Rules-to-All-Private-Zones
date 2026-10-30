@@ -1,7 +1,10 @@
-# clusters.yaml — Zone cluster definitions
-# Group your firewall zones into named clusters for easy multi-zone rule creation.
+# clusters.yaml — Zone cluster definitions and controller defaults
 # Zone names must match exactly what appears in your UniFi controller.
-# No credentials are stored here.
+# No credentials are stored here — passwords are always prompted at runtime.
+
+controller:
+  host: 192.168.1.1   # IP address or FQDN of your UDM Pro / controller
+  username: ""        # Pre-populate username (leave blank to always prompt)
 
 clusters:
   Internal:

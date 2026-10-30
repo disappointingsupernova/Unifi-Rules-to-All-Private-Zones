@@ -13,6 +13,10 @@ from rich.console import Console
 from rich.panel import Panel
 
 from src.unifi_manager.api import UnifiClient, UnifiAPIError
+from src.unifi_manager.config import (
+    load_controller_defaults,
+    save_controller_defaults,
+)
 from src.unifi_manager.ui.flows import (
     select_site,
     flow_create_rules,
@@ -27,13 +31,23 @@ console = Console()
 
 
 def prompt_credentials() -> tuple[str, str, str]:
-    host = questionary.text("UDM/Controller IP or hostname:").ask()
-    username = questionary.text("Username:").ask()
+    defaults = load_controller_defaults()
+
+    host_prompt = questionary.text(
+        "UDM/Controller IP or hostname:",
+        default=defaults["host"],
+    ).ask()
+    username_prompt = questionary.text(
+        "Username:",
+        default=defaults["username"],
+    ).ask()
     password = getpass.getpass("Password: ")
-    if not host or not username or not password:
+
+    if not host_prompt or not username_prompt or not password:
         console.print("[red]Cancelled.[/red]")
         sys.exit(0)
-    return host.strip(), username.strip(), password
+
+    return host_prompt.strip(), username_prompt.strip(), password
 
 
 def main() -> None:
@@ -57,6 +71,15 @@ def main() -> None:
         with console.status("Logging in..."):
             client.login(username, password)
         console.print("[green]✓ Logged in.[/green]")
+
+        # Offer to save host/username as defaults (never the password)
+        defaults = load_controller_defaults()
+        if host != defaults["host"] or username != defaults["username"]:
+            if questionary.confirm(
+                "Save host and username as defaults in clusters.yaml?", default=True
+            ).ask():
+                save_controller_defaults(host, username)
+                console.print("[dim]Defaults saved to clusters.yaml.[/dim]")
 
         site_id = select_site(client)
         client.set_site(site_id)

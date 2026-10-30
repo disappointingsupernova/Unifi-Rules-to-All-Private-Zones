@@ -28,20 +28,22 @@ class UnifiClient:
         if resp.status_code != 200:
             raise UnifiAPIError(f"Login failed ({resp.status_code}): {resp.text}")
 
-        # Extract TOKEN from Set-Cookie header directly — more reliable than
+        # Extract TOKEN from Set-Cookie headers directly — more reliable than
         # the cookie jar when the cookie carries partitioned/httponly flags
-        # or when the client IP differs from the expected domain (e.g. WSL).
+        # or when the client is running from a different network namespace (WSL).
+        # requests uses CaseInsensitiveDict which does not support getlist, so
+        # iterate the raw urllib3 headers to capture all Set-Cookie values.
         token = None
-        for header_val in resp.headers.getlist("Set-Cookie"):
+        raw_headers = resp.raw.headers.getlist("Set-Cookie") if hasattr(resp.raw.headers, "getlist") else [resp.raw.headers.get("Set-Cookie", "")]
+        for header_val in raw_headers:
             for part in header_val.split(";"):
-                part = part.strip()
-                if part.startswith("TOKEN="):
-                    token = part[len("TOKEN="):]
+                if part.strip().startswith("TOKEN="):
+                    token = part.strip()[len("TOKEN="):]
                     break
             if token:
                 break
 
-        # Fall back to the cookie jar if header parsing found nothing
+        # Fall back to the cookie jar if raw header parsing found nothing
         if not token:
             token = resp.cookies.get("TOKEN")
 
