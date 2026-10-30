@@ -1,26 +1,15 @@
 """Load and save zone cluster configuration and controller defaults from clusters.yaml."""
 
-import os
 import shutil
 import yaml
 from pathlib import Path
 
 try:
     import keyring
-    # On WSL and headless Linux, dbus is not running so the SecretService
-    # backend causes a SIGFPE or hangs. Force the fail backend in that case
-    # so keyring is treated as unavailable rather than crashing the process.
-    import sys
-    if sys.platform == "linux" and not os.environ.get("DBUS_SESSION_BUS_ADDRESS"):
-        from keyring.backends.fail import Keyring as _FailKeyring
-        keyring.set_keyring(_FailKeyring())
-        _KEYRING_AVAILABLE = False
-    else:
-        _backend_name = type(keyring.get_keyring()).__module__
-        _KEYRING_AVAILABLE = not any(
-            bad in _backend_name
-            for bad in ("fail", "null", "chainer", "alt")
-        )
+    _backend_name = type(keyring.get_keyring()).__module__
+    _KEYRING_AVAILABLE = not any(
+        bad in _backend_name for bad in ("fail", "null", "chainer", "alt")
+    )
 except Exception:
     _KEYRING_AVAILABLE = False
 

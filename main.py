@@ -13,10 +13,17 @@ The legacy backup endpoint still uses session-cookie auth, so username
 and password are only prompted when performing a backup.
 """
 
+import os
+import sys
+
+# Must be set before any keyring import to prevent SIGFPE on WSL/headless Linux
+# where dbus is not running. The env var tells keyring to skip backend discovery.
+if sys.platform == "linux" and not os.environ.get("DBUS_SESSION_BUS_ADDRESS"):
+    os.environ["PYTHON_KEYRING_BACKEND"] = "keyring.backends.null.Keyring"
+
 import ctypes
 import getpass
 import signal
-import sys
 
 import questionary
 from rich.console import Console
