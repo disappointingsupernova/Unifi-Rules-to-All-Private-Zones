@@ -1,14 +1,23 @@
 """Load and save zone cluster configuration and controller defaults from clusters.yaml."""
 
+import shutil
 import yaml
 from pathlib import Path
 
 # clusters.yaml lives at the repo root, two levels above this file
 CONFIG_PATH = Path(__file__).parent.parent.parent / "clusters.yaml"
+EXAMPLE_PATH = CONFIG_PATH.parent / "clusters.example.yaml"
+
+
+def _ensure_config() -> None:
+    """Copy clusters.example.yaml to clusters.yaml on first run if absent."""
+    if not CONFIG_PATH.exists() and EXAMPLE_PATH.exists():
+        shutil.copy(EXAMPLE_PATH, CONFIG_PATH)
 
 
 def load_clusters() -> dict[str, list[str]]:
     """Return {cluster_name: [zone_name, ...]} or empty dict."""
+    _ensure_config()
     if not CONFIG_PATH.exists():
         return {}
     with open(CONFIG_PATH) as f:
@@ -18,6 +27,7 @@ def load_clusters() -> dict[str, list[str]]:
 
 def load_controller_defaults() -> dict[str, str]:
     """Return {host, username} from the controller stanza, with empty-string defaults."""
+    _ensure_config()
     if not CONFIG_PATH.exists():
         return {"host": "", "username": ""}
     with open(CONFIG_PATH) as f:

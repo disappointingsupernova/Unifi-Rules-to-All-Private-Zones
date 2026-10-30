@@ -19,6 +19,10 @@ htmlcov/
 .env
 *.local.yaml
 
+# Local config — contains your controller IP and username.
+# Copy clusters.example.yaml to clusters.yaml to get started.
+clusters.yaml
+
 # IDE
 .vscode/
 .idea/

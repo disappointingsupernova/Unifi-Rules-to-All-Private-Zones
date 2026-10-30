@@ -24,7 +24,12 @@ Push firewall policies across multiple zones on a UDM Pro / UniFi Network Applic
 
 ```bash
 pip install -r requirements.txt
+cp clusters.example.yaml clusters.yaml
 ```
+
+Edit `clusters.yaml` with your controller IP, username, and any zone clusters. This file is listed in `.gitignore` and will never be committed.
+
+Alternatively, `clusters.yaml` is created automatically from the example on first run — you can then edit it and re-run.
 
 ## Usage
 
@@ -57,4 +62,4 @@ To decrypt: run the tool and choose **Decrypt a backup file** from the opening m
 
 - The tool uses the `/proxy/network/integration` API (the official v1 Integration API), not the legacy `api/s/default` endpoints, except for backup which uses the legacy backup command.
 - SSL verification is disabled for self-signed certs on local UDMs.
-- `clusters.yaml` is safe to commit — it contains no credentials.
+- `clusters.yaml` is listed in `.gitignore` — it contains your controller IP and username but no passwords. `clusters.example.yaml` is the committed template.

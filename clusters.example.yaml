@@ -1,0 +1,31 @@
+# clusters.example.yaml — Example configuration for Unifi-Rules-to-All-Private-Zones
+#
+# Copy this file to clusters.yaml and edit it for your environment.
+#
+#   cp clusters.example.yaml clusters.yaml
+#
+# clusters.yaml is listed in .gitignore so your local settings (including
+# your controller IP and username) are never accidentally committed.
+# Passwords are NEVER stored here — they are always prompted at runtime.
+
+controller:
+  host: 192.168.1.1       # IP address or FQDN of your UDM Pro / controller
+  username: admin         # Pre-populate username (leave blank to always prompt)
+
+# Zone clusters — group zones by name for easy bulk rule creation.
+# Zone names must match exactly what appears in your UniFi controller.
+# You can also create and edit clusters from within the tool itself.
+clusters:
+  Internal:
+    - LAN
+    - IoT
+    - Servers
+    - Management
+
+  Web Apps:
+    - Web Servers
+    - MySQL
+
+  Trusted:
+    - LAN
+    - Management
