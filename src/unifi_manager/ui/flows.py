@@ -594,6 +594,10 @@ def flow_extend_rules(client: UnifiClient) -> None:
     else:
         pairs = [(fixed_z, new_z) for fixed_z in fixed_zones for new_z in new_zones]
 
+    def matching_for(dz: dict) -> dict | None:
+        p = next((p for p in template_policies if p["destination"]["zoneId"] == dz["id"]), template)
+        return p["destination"].get("trafficFilter")
+
     console.print()
     console.print(Rule("[bold]Extension Preview[/bold]"))
     pt = Table(show_lines=True, expand=False)
@@ -601,8 +605,26 @@ def flow_extend_rules(client: UnifiClient) -> None:
     pt.add_column("Policy Name", style="cyan")
     pt.add_column("Source Zone", style="green")
     pt.add_column("Destination Zone", style="blue")
+    pt.add_column("Protocol", style="magenta")
+    pt.add_column("Dest Filter", style="yellow")
     for n, (sz, dz) in enumerate(pairs, 1):
-        pt.add_row(str(n), f"{selected_group} | {sz['name']} -> {dz['name']}", sz["name"], dz["name"])
+        # Summarise protocol from ip_scope
+        proto = ip_scope.get("protocolFilter", {}).get("protocol", {}).get("name") \
+            or ip_scope.get("protocolFilter", {}).get("preset", {}).get("name") \
+            or "any"
+        # Summarise dest traffic filter
+        dtf = matching_for(dz)
+        pf = dtf.get("portFilter", {}) if dtf else {}
+        port_str = ", ".join(
+            str(i.get("value", f"{i.get('start')}-{i.get('end')}"))
+            for i in pf.get("items", [])
+        ) if pf.get("items") else ""
+        ip_str = ""
+        if dtf and dtf.get("type") == "IP_ADDRESS":
+            items = dtf.get("ipAddressFilter", {}).get("items", [])
+            ip_str = ", ".join(i.get("value", "") for i in items)
+        dest_filter = " / ".join(x for x in [ip_str, port_str] if x) or "any"
+        pt.add_row(str(n), f"{selected_group} | {sz['name']} -> {dz['name']}", sz["name"], dz["name"], proto.upper(), dest_filter)
     console.print(pt)
 
     if not questionary.confirm(f"Create {len(pairs)} new policies?", default=False).ask():
