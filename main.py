@@ -33,6 +33,7 @@ from src.unifi_manager.config import (
 )
 from src.unifi_manager.ui.flows import (
     flow_backup,
+    flow_cleanup_duplicates,
     flow_create_rules,
     flow_decrypt_backup,
     flow_extend_rules,
@@ -165,6 +166,7 @@ def main() -> None:
                     "Create firewall rules across zones",
                     "Extend existing rules to more zones",
                     "List existing policies",
+                    "Clean up duplicate unmanaged policies",
                     "Manage port lists",
                     "Backup site config",
                     "Manage zone clusters",
@@ -179,6 +181,8 @@ def main() -> None:
                 flow_extend_rules(_client)
             elif action == "List existing policies":
                 flow_list_policies(_client)
+            elif action == "Clean up duplicate unmanaged policies":
+                flow_cleanup_duplicates(_client)
             elif action == "Manage port lists":
                 flow_manage_port_lists(_client)
             elif action == "Backup site config":

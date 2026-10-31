@@ -631,7 +631,12 @@ def flow_extend_rules(client: UnifiClient) -> None:
         console.print("[dim]Aborted.[/dim]")
         return
 
-    created, failed = 0, 0
+    # Fetch existing policies for duplicate detection
+    with _make_progress() as progress:
+        t_ex = progress.add_task("Checking for existing policies...", total=None)
+        existing_policies = client.get_policies(progress, t_ex)
+
+    created, skipped, failed = 0, 0, 0
     for sz, dz in pairs:
         policy_name = f"{selected_group} | {sz['name']} -> {dz['name']}"
         matching = next(
@@ -647,15 +652,86 @@ def flow_extend_rules(client: UnifiClient) -> None:
             ip_scope=ip_scope,
             dest_traffic_filter=dest_traffic_filter,
         )
+
+        exact = next((p for p in existing_policies if p.get("name") == policy_name), None)
+        if exact:
+            console.print(f"  [dim]-[/dim] {policy_name} [dim](already exists, skipped)[/dim]")
+            skipped += 1
+            continue
+
         try:
-            client.create_policy(policy)
+            result = client.create_policy(policy)
             console.print(f"  [green]OK[/green] {policy_name}")
             created += 1
+            existing_policies.append(result)
         except UnifiAPIError as e:
             console.print(f"  [red]FAIL[/red] {policy_name}: {e}")
             failed += 1
 
-    console.print(f"\n[bold]Done:[/bold] {created} created, {failed} failed.")
+    parts = [f"{created} created"]
+    if skipped:
+        parts.append(f"{skipped} skipped (already existed)")
+    if failed:
+        parts.append(f"{failed} failed")
+    console.print(f"\n[bold]Done:[/bold] {', '.join(parts)}.")
+
+
+def flow_cleanup_duplicates(client: UnifiClient) -> None:
+    """Find unmanaged policies that are functionally identical to a managed one and offer to remove them."""
+    with _make_progress() as progress:
+        t_pol = progress.add_task("Fetching policies...", total=None)
+        all_policies = client.get_policies(progress, t_pol)
+
+    managed = [p for p in all_policies if TOOL_SIGNATURE in (p.get("description") or "")]
+    unmanaged = [
+        p for p in all_policies
+        if TOOL_SIGNATURE not in (p.get("description") or "")
+        and p.get("metadata", {}).get("origin") == "USER_DEFINED"
+    ]
+
+    if not managed:
+        console.print(f"[yellow]No managed policies (stamped with '{markup_escape(TOOL_SIGNATURE)}') found.[/yellow]")
+        return
+
+    # Find unmanaged policies that are functionally identical to a managed one
+    duplicates: list[tuple[dict, dict]] = []  # (unmanaged, managed_equivalent)
+    for u in unmanaged:
+        equiv = next((m for m in managed if _policies_match(u, m)), None)
+        if equiv:
+            duplicates.append((u, equiv))
+
+    if not duplicates:
+        console.print("[green]No duplicate unmanaged policies found.[/green]")
+        return
+
+    console.print(f"\n[bold]{len(duplicates)} unmanaged policies have a managed equivalent:[/bold]\n")
+
+    deleted, kept = 0, 0
+    for u, m in duplicates:
+        t = Table(show_lines=True, expand=False)
+        t.add_column("Field", style="dim")
+        t.add_column("Unmanaged (to remove)", style="yellow")
+        t.add_column("Managed (to keep)", style="green")
+        t.add_row("Name", u.get("name", ""), m.get("name", ""))
+        t.add_row("Origin", u.get("metadata", {}).get("origin", ""), m.get("metadata", {}).get("origin", ""))
+        t.add_row("Description", u.get("description") or "(none)", m.get("description") or "(none)")
+        console.print(t)
+
+        if questionary.confirm(
+            f"Delete unmanaged policy '{u['name']}'?", default=False
+        ).ask():
+            try:
+                client.delete_policy(u["id"])
+                console.print(f"  [green]Deleted '{u['name']}'[/green]")
+                deleted += 1
+            except UnifiAPIError as e:
+                console.print(f"  [red]Failed to delete '{u['name']}': {e}[/red]")
+        else:
+            console.print(f"  [dim]Kept '{u['name']}'[/dim]")
+            kept += 1
+        console.print()
+
+    console.print(f"[bold]Done:[/bold] {deleted} deleted, {kept} kept.")
 
 
 def flow_list_policies(client: UnifiClient) -> None:
