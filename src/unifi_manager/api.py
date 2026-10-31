@@ -175,13 +175,27 @@ class UnifiClient:
         return self._get(self._site_path(f"/firewall/policies/{policy_id}"))
 
     def patch_policy(self, policy_id: str, payload: dict) -> dict:
-        resp = self.session.patch(
+        """PUT a full policy update — fetch existing first, merge name change, then PUT."""
+        existing = self.get_policy(policy_id)
+        # Build a PUT payload from the existing policy, overriding with payload fields
+        put_payload = {
+            "name": existing.get("name"),
+            "description": existing.get("description", ""),
+            "enabled": existing.get("enabled", True),
+            "loggingEnabled": existing.get("loggingEnabled", False),
+            "action": existing.get("action"),
+            "ipProtocolScope": existing.get("ipProtocolScope"),
+            "source": existing.get("source"),
+            "destination": existing.get("destination"),
+        }
+        put_payload.update(payload)
+        resp = self.session.put(
             f"{self.integration}{self._site_path(f'/firewall/policies/{policy_id}')}",
-            json=payload,
+            json=put_payload,
             timeout=10,
         )
         if resp.status_code != 200:
-            raise UnifiAPIError(f"PATCH policy failed ({resp.status_code}): {resp.text}")
+            raise UnifiAPIError(f"PUT policy failed ({resp.status_code}): {resp.text}")
         return resp.json()
 
     def get_traffic_matching_lists(self) -> list[dict]:
