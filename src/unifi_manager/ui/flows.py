@@ -18,7 +18,6 @@ from src.unifi_manager.crypto import decrypt_backup, encrypt_backup
 
 console = Console()
 
-# Embedded in every policy description so tool-created rules are identifiable
 TOOL_SIGNATURE = "[unifi-zone-manager]"
 
 
@@ -99,7 +98,7 @@ def pick_zones(zones: list[dict], message: str, allow_excluded: bool = False) ->
     missing = picked_names - {z["name"] for z in matched}
     for m in missing:
         console.print(
-            f"  [yellow]⚠ Zone '{m}' from cluster not found on controller — skipped.[/yellow]"
+            f"  [yellow]Zone '{m}' from cluster not found on controller - skipped.[/yellow]"
         )
 
     return matched
@@ -129,7 +128,6 @@ def build_ip_scope(protocol: str) -> dict:
                 "preset": {"name": "TCP_UDP"},
             },
         }
-    # TCP, UDP, ICMP — uppercase named protocol
     return {
         "ipVersion": "IPV4",
         "protocolFilter": {
@@ -219,16 +217,15 @@ def preview_policies(
     dest_zones: list[dict],
     dry_run: bool,
 ) -> None:
-    """Print a full preview table of every policy that would be created."""
     console.print()
     console.print(Rule("[bold]Policy Preview[/bold]"))
 
     proto_label = _proto_label(protocol, ports, port_list_name)
     dest_label = dest_ip if dest_ip else "any"
     mode_label = (
-        "[yellow bold]DRY RUN — nothing will be created[/yellow bold]"
+        "[yellow bold]DRY RUN - nothing will be created[/yellow bold]"
         if dry_run
-        else "[green]LIVE — will be created on confirm[/green]"
+        else "[green]LIVE - will be created on confirm[/green]"
     )
 
     summary = (
@@ -238,7 +235,7 @@ def preview_policies(
         f"  Dest IP     : [cyan]{dest_label}[/cyan]\n"
         f"  Mode        : {mode_label}\n"
         f"  Policies    : [bold]{len(source_zones) * len(dest_zones)}[/bold] "
-        f"({len(source_zones)} source × {len(dest_zones)} destination)"
+        f"({len(source_zones)} source x {len(dest_zones)} destination)"
     )
     console.print(Panel(summary, title="Rule Configuration", expand=False))
 
@@ -255,7 +252,7 @@ def preview_policies(
     ):
         t.add_row(
             str(n),
-            f"{rule_name} | {sz['name']} → {dz['name']}",
+            f"{rule_name} | {sz['name']} -> {dz['name']}",
             sz["name"],
             dz["name"],
             proto_label,
@@ -267,7 +264,6 @@ def preview_policies(
 
 
 def _policies_match(existing: dict, candidate: dict) -> bool:
-    """Return True if two policies are functionally identical (ignoring name/description)."""
     return (
         existing.get("source", {}).get("zoneId") == candidate["source"]["zoneId"]
         and existing.get("destination", {}).get("zoneId") == candidate["destination"]["zoneId"]
@@ -300,17 +296,17 @@ def flow_create_rules(client: UnifiClient) -> None:
 
     console.print()
     dry_run = questionary.confirm(
-        "Dry run? (preview only — nothing will be sent to the controller)", default=False
+        "Dry run? (preview only - nothing will be sent to the controller)", default=False
     ).ask()
 
-    console.print(Rule("[dim]Step 1 — Rule details[/dim]"))
+    console.print(Rule("[dim]Step 1 - Rule details[/dim]"))
     rule_name = questionary.text("Rule name prefix (e.g. 'Allow Syslog'):").ask()
     if not rule_name:
         return
     user_description = questionary.text("Description (optional):").ask() or ""
     description = f"{user_description} {TOOL_SIGNATURE}".strip()
 
-    console.print(Rule("[dim]Step 2 — Protocol & ports[/dim]"))
+    console.print(Rule("[dim]Step 2 - Protocol & ports[/dim]"))
     protocol = questionary.select(
         "Protocol:", choices=["udp", "tcp", "tcp+udp", "icmp", "any"]
     ).ask()
@@ -326,7 +322,7 @@ def flow_create_rules(client: UnifiClient) -> None:
         ).ask()
 
         if port_source == "Enter ports manually":
-            raw = questionary.text("Ports — comma separated (e.g. 514,515):").ask()
+            raw = questionary.text("Ports - comma separated (e.g. 514,515):").ask()
             if raw:
                 try:
                     ports = [int(p.strip()) for p in raw.split(",") if p.strip()]
@@ -347,7 +343,7 @@ def flow_create_rules(client: UnifiClient) -> None:
             choices = [
                 f"{l['name']}  "
                 f"({', '.join(str(i.get('value', i.get('start', ''))) for i in l.get('items', [])[:5])}"
-                f"{'…' if len(l.get('items', [])) > 5 else ''})"
+                f"{'...' if len(l.get('items', [])) > 5 else ''})"
                 for l in port_lists
             ]
             choice = questionary.select("Select port list:", choices=choices).ask()
@@ -355,15 +351,15 @@ def flow_create_rules(client: UnifiClient) -> None:
             port_list_id = port_lists[idx]["id"]
             port_list_name = port_lists[idx]["name"]
 
-    console.print(Rule("[dim]Step 3 — Destination IP (optional)[/dim]"))
+    console.print(Rule("[dim]Step 3 - Destination IP (optional)[/dim]"))
     dest_ip = (
         questionary.text(
-            "Destination IP or subnet (e.g. 10.10.20.5 or 10.10.20.0/24) — leave blank for any:"
+            "Destination IP or subnet (e.g. 10.10.20.5 or 10.10.20.0/24) - leave blank for any:"
         ).ask()
         or ""
     )
 
-    console.print(Rule("[dim]Step 4 — Source zones[/dim]"))
+    console.print(Rule("[dim]Step 4 - Source zones[/dim]"))
     include_excluded = questionary.confirm(
         "Include excluded zones (External, Gateway, VPN etc.)?", default=False
     ).ask()
@@ -378,7 +374,7 @@ def flow_create_rules(client: UnifiClient) -> None:
         "  Selected: " + ", ".join(f"[green]{z['name']}[/green]" for z in source_zones)
     )
 
-    console.print(Rule("[dim]Step 5 — Destination zones[/dim]"))
+    console.print(Rule("[dim]Step 5 - Destination zones[/dim]"))
     dest_zones = pick_zones(
         zones, "Select DESTINATION zones (where traffic is going):",
         allow_excluded=include_excluded,
@@ -396,7 +392,7 @@ def flow_create_rules(client: UnifiClient) -> None:
     )
 
     if dry_run:
-        console.print("[yellow]Dry run complete — no changes made.[/yellow]")
+        console.print("[yellow]Dry run complete - no changes made.[/yellow]")
         return
 
     if not questionary.confirm(
@@ -416,7 +412,6 @@ def flow_create_rules(client: UnifiClient) -> None:
 
     dest_traffic_filter = build_dest_traffic_filter(dest_ip, port_filter)
 
-    # Fetch existing policies once for duplicate detection
     with _make_progress() as progress:
         t_existing = progress.add_task("Checking for existing policies...", total=None)
         existing_policies = client.get_policies(progress, t_existing)
@@ -425,7 +420,7 @@ def flow_create_rules(client: UnifiClient) -> None:
     created, skipped, replaced, failed = 0, 0, 0, 0
     for sz in source_zones:
         for dz in dest_zones:
-            policy_name = f"{rule_name} | {sz['name']} → {dz['name']}"
+            policy_name = f"{rule_name} | {sz['name']} -> {dz['name']}"
             policy = build_policy(
                 name=policy_name,
                 description=description,
@@ -435,16 +430,14 @@ def flow_create_rules(client: UnifiClient) -> None:
                 dest_traffic_filter=dest_traffic_filter,
             )
 
-            # Check for exact name match — already exists, skip
             exact = next(
                 (p for p in existing_policies if p.get("name") == policy_name), None
             )
             if exact:
-                console.print(f"  [dim]─[/dim] {policy_name} [dim](already exists, skipped)[/dim]")
+                console.print(f"  [dim]-[/dim] {policy_name} [dim](already exists, skipped)[/dim]")
                 skipped += 1
                 continue
 
-            # Check for functional duplicate with a different name
             duplicate = next(
                 (p for p in existing_policies
                  if _policies_match(p, policy)
@@ -455,31 +448,28 @@ def flow_create_rules(client: UnifiClient) -> None:
             try:
                 result = client.create_policy(policy)
                 new_id = result.get("id")
-                console.print(f"  [green]✓[/green] {policy_name}")
+                console.print(f"  [green]OK[/green] {policy_name}")
                 created += 1
 
                 if duplicate and new_id:
-                    # Verify new policy exists before removing old one
                     try:
                         client.get_policy(new_id)
                         client.delete_policy(duplicate["id"])
                         console.print(
-                            f"    [yellow]↳ Replaced '[/yellow]{duplicate['name']}[yellow]' "
+                            f"    [yellow]Replaced '{duplicate['name']}' "
                             f"(same rule, different name)[/yellow]"
                         )
                         replaced += 1
-                        # Update local cache so subsequent iterations see the deletion
                         existing_policies = [p for p in existing_policies if p["id"] != duplicate["id"]]
                     except UnifiAPIError as e:
                         console.print(
-                            f"    [red]↳ Could not remove old policy '{duplicate['name']}': {e}[/red]"
+                            f"    [red]Could not remove old policy '{duplicate['name']}': {e}[/red]"
                         )
 
-                # Add new policy to local cache
                 existing_policies.append(result)
 
             except UnifiAPIError as e:
-                console.print(f"  [red]✗[/red] {policy_name}: {e}")
+                console.print(f"  [red]FAIL[/red] {policy_name}: {e}")
                 failed += 1
 
     parts = [f"{created} created"]
@@ -489,11 +479,11 @@ def flow_create_rules(client: UnifiClient) -> None:
         parts.append(f"{skipped} skipped (already existed)")
     if failed:
         parts.append(f"{failed} failed")
-    console.print(f"\n[bold]Done:[/bold] {', '.join(parts)}.")  
+    console.print(f"\n[bold]Done:[/bold] {', '.join(parts)}.")
 
 
 def flow_extend_rules(client: UnifiClient) -> None:
-    """Find tool-created policies and extend them to additional source zones."""
+    """Find tool-created policies and extend them to additional zones."""
     from concurrent.futures import ThreadPoolExecutor
     with _make_progress() as progress:
         t_policies = progress.add_task("Fetching policies...", total=None)
@@ -508,7 +498,6 @@ def flow_extend_rules(client: UnifiClient) -> None:
 
     zone_id_map = {z["id"]: z["name"] for z in zones}
 
-    # Filter to tool-created policies, but offer fallback to all USER_DEFINED
     tool_policies = [
         p for p in all_policies
         if TOOL_SIGNATURE in (p.get("description") or "")
@@ -523,21 +512,17 @@ def flow_extend_rules(client: UnifiClient) -> None:
         if not user_policies:
             console.print("[yellow]No user-defined policies found at all.[/yellow]")
             return
-        if not questionary.confirm(
-            "Show all user-defined policies instead?", default=True
-        ).ask():
+        if not questionary.confirm("Show all user-defined policies instead?", default=True).ask():
             return
         candidate_policies = user_policies
     else:
         candidate_policies = tool_policies
 
-    # Group by rule prefix (everything before " | ")
     groups: dict[str, list[dict]] = {}
     for p in candidate_policies:
         prefix = p["name"].split(" | ")[0].strip()
         groups.setdefault(prefix, []).append(p)
 
-    # Display grouped summary
     t = Table(title=f"Rule Groups ({len(groups)})", show_lines=True)
     t.add_column("#", style="dim", width=4)
     t.add_column("Rule Group", style="cyan")
@@ -550,27 +535,43 @@ def flow_extend_rules(client: UnifiClient) -> None:
         t.add_row(str(i), prefix, str(len(policies)), src_names, dst_names)
     console.print(t)
 
-    # Pick a group to extend
     group_choices = list(groups.keys())
     selected_group = questionary.select(
-        "Select rule group to extend to additional source zones:",
+        "Select rule group to extend:",
         choices=group_choices,
     ).ask()
     if not selected_group:
         return
 
     template_policies = groups[selected_group]
-
     existing_source_ids = {p["source"]["zoneId"] for p in template_policies}
     existing_dest_ids = {p["destination"]["zoneId"] for p in template_policies}
 
-    console.print(f"\n[bold]Existing source zones:[/bold] "
-        + ", ".join(f"[green]{zone_id_map.get(i, i)}[/green]" for i in existing_source_ids))
-    console.print(f"[bold]Destination zones:[/bold] "
-        + ", ".join(f"[blue]{zone_id_map.get(i, i)}[/blue]" for i in existing_dest_ids))
+    console.print(
+        "\n[bold]Existing source zones:[/bold] "
+        + ", ".join(f"[green]{zone_id_map.get(i, i)}[/green]" for i in existing_source_ids)
+    )
+    console.print(
+        "[bold]Destination zones:[/bold] "
+        + ", ".join(f"[blue]{zone_id_map.get(i, i)}[/blue]" for i in existing_dest_ids)
+    )
 
-    # Pick additional source zones — exclude already-covered ones
-    available_zones = [z for z in zones if z["id"] not in existing_source_ids]
+    direction = questionary.select(
+        "Extend by adding new:",
+        choices=[
+            "Source zones (same destinations, new sources)",
+            "Destination zones (same sources, new destinations)",
+        ],
+    ).ask()
+    extend_sources = direction.startswith("Source")
+
+    if extend_sources:
+        available_zones = [z for z in zones if z["id"] not in existing_source_ids]
+        picker_message = "Select additional SOURCE zones to extend to:"
+    else:
+        available_zones = [z for z in zones if z["id"] not in existing_dest_ids]
+        picker_message = "Select additional DESTINATION zones to extend to:"
+
     if not available_zones:
         console.print("[yellow]All zones are already covered by this rule group.[/yellow]")
         return
@@ -578,22 +579,21 @@ def flow_extend_rules(client: UnifiClient) -> None:
     include_excluded = questionary.confirm(
         "Include excluded zones (External, Gateway, VPN etc.)?", default=False
     ).ask()
-    new_source_zones = pick_zones(
-        available_zones, "Select additional SOURCE zones to extend to:",
-        allow_excluded=include_excluded,
-    )
-    if not new_source_zones:
+    new_zones = pick_zones(available_zones, picker_message, allow_excluded=include_excluded)
+    if not new_zones:
         console.print("[yellow]No zones selected.[/yellow]")
         return
 
-    # Use the first template policy to clone ipProtocolScope, trafficFilter, description
     template = template_policies[0]
     ip_scope = template["ipProtocolScope"]
     description = template.get("description", TOOL_SIGNATURE)
 
-    # Preview
-    dest_zones = [z for z in zones if z["id"] in existing_dest_ids]
-    total = len(new_source_zones) * len(dest_zones)
+    fixed_zones = [z for z in zones if z["id"] in (existing_dest_ids if extend_sources else existing_source_ids)]
+    if extend_sources:
+        pairs = [(new_z, fixed_z) for new_z in new_zones for fixed_z in fixed_zones]
+    else:
+        pairs = [(fixed_z, new_z) for fixed_z in fixed_zones for new_z in new_zones]
+
     console.print()
     console.print(Rule("[bold]Extension Preview[/bold]"))
     pt = Table(show_lines=True, expand=False)
@@ -601,47 +601,37 @@ def flow_extend_rules(client: UnifiClient) -> None:
     pt.add_column("Policy Name", style="cyan")
     pt.add_column("Source Zone", style="green")
     pt.add_column("Destination Zone", style="blue")
-    n = 1
-    for sz in new_source_zones:
-        for dz in dest_zones:
-            pt.add_row(
-                str(n),
-                f"{selected_group} | {sz['name']} \u2192 {dz['name']}",
-                sz["name"],
-                dz["name"],
-            )
-            n += 1
+    for n, (sz, dz) in enumerate(pairs, 1):
+        pt.add_row(str(n), f"{selected_group} | {sz['name']} -> {dz['name']}", sz["name"], dz["name"])
     console.print(pt)
 
-    if not questionary.confirm(f"Create {total} new policies?", default=False).ask():
+    if not questionary.confirm(f"Create {len(pairs)} new policies?", default=False).ask():
         console.print("[dim]Aborted.[/dim]")
         return
 
     created, failed = 0, 0
-    for sz in new_source_zones:
-        for dz in dest_zones:
-            policy_name = f"{selected_group} | {sz['name']} \u2192 {dz['name']}"
-            # Clone destination trafficFilter from the matching dest zone template
-            matching = next(
-                (p for p in template_policies if p["destination"]["zoneId"] == dz["id"]),
-                template,
-            )
-            dest_traffic_filter = matching["destination"].get("trafficFilter")
-            policy = build_policy(
-                name=policy_name,
-                description=description,
-                source_zone_id=sz["id"],
-                dest_zone_id=dz["id"],
-                ip_scope=ip_scope,
-                dest_traffic_filter=dest_traffic_filter,
-            )
-            try:
-                client.create_policy(policy)
-                console.print(f"  [green]✓[/green] {policy_name}")
-                created += 1
-            except UnifiAPIError as e:
-                console.print(f"  [red]✗[/red] {policy_name}: {e}")
-                failed += 1
+    for sz, dz in pairs:
+        policy_name = f"{selected_group} | {sz['name']} -> {dz['name']}"
+        matching = next(
+            (p for p in template_policies if p["destination"]["zoneId"] == dz["id"]),
+            template,
+        )
+        dest_traffic_filter = matching["destination"].get("trafficFilter")
+        policy = build_policy(
+            name=policy_name,
+            description=description,
+            source_zone_id=sz["id"],
+            dest_zone_id=dz["id"],
+            ip_scope=ip_scope,
+            dest_traffic_filter=dest_traffic_filter,
+        )
+        try:
+            client.create_policy(policy)
+            console.print(f"  [green]OK[/green] {policy_name}")
+            created += 1
+        except UnifiAPIError as e:
+            console.print(f"  [red]FAIL[/red] {policy_name}: {e}")
+            failed += 1
 
     console.print(f"\n[bold]Done:[/bold] {created} created, {failed} failed.")
 
@@ -663,12 +653,12 @@ def flow_list_policies(client: UnifiClient) -> None:
         action = p.get("action", {}).get("type", "?")
         origin = p.get("metadata", {}).get("origin", "?")
         enabled = "[green]yes[/green]" if p.get("enabled") else "[red]no[/red]"
-        managed = "[cyan]✓[/cyan]" if TOOL_SIGNATURE in (p.get("description") or "") else ""
+        managed = "[cyan]OK[/cyan]" if TOOL_SIGNATURE in (p.get("description") or "") else ""
         t.add_row(str(i), p.get("name", ""), action, enabled, managed, origin)
     console.print(t)
     tool_count = sum(1 for p in policies if TOOL_SIGNATURE in (p.get("description") or ""))
     if tool_count:
-        console.print(f"[dim]{tool_count} policies managed by this tool (✓)[/dim]")
+        console.print(f"[dim]{tool_count} policies managed by this tool[/dim]")
 
 
 def flow_manage_port_lists(client: UnifiClient) -> None:
@@ -707,7 +697,7 @@ def flow_manage_port_lists(client: UnifiClient) -> None:
             if not name:
                 continue
             raw = questionary.text(
-                "Ports — comma separated, ranges with hyphen (e.g. 80,443,8000-8080):"
+                "Ports - comma separated, ranges with hyphen (e.g. 80,443,8000-8080):"
             ).ask()
             if not raw:
                 continue
@@ -732,12 +722,10 @@ def flow_manage_port_lists(client: UnifiClient) -> None:
                 if item["type"] == "PORT_NUMBER":
                     t.add_row("Single", str(item["value"]))
                 else:
-                    t.add_row("Range", f"{item['start']} – {item['end']}")
+                    t.add_row("Range", f"{item['start']} - {item['end']}")
             console.print(t)
 
-            if not questionary.confirm(
-                f"Create port list '{name}' with {len(items)} entries?"
-            ).ask():
+            if not questionary.confirm(f"Create port list '{name}' with {len(items)} entries?").ask():
                 continue
 
             try:
@@ -745,7 +733,7 @@ def flow_manage_port_lists(client: UnifiClient) -> None:
                     {"type": "PORTS", "name": name, "items": items}
                 )
                 console.print(
-                    f"[green]✓ Created port list '{name}' (ID: {result.get('id', '?')})[/green]"
+                    f"[green]Created port list '{name}' (ID: {result.get('id', '?')})[/green]"
                 )
             except UnifiAPIError as e:
                 console.print(f"[red]Failed: {e}[/red]")
@@ -757,13 +745,11 @@ def flow_manage_port_lists(client: UnifiClient) -> None:
             choices = [f"{l['name']}  (ID: {l['id']})" for l in port_lists]
             choice = questionary.select("Select port list to delete:", choices=choices).ask()
             target = port_lists[choices.index(choice)]
-            if not questionary.confirm(
-                f"Delete '{target['name']}'? This cannot be undone."
-            ).ask():
+            if not questionary.confirm(f"Delete '{target['name']}'? This cannot be undone.").ask():
                 continue
             try:
                 client.delete_traffic_matching_list(target["id"])
-                console.print(f"[green]✓ Deleted '{target['name']}'[/green]")
+                console.print(f"[green]Deleted '{target['name']}'[/green]")
             except UnifiAPIError as e:
                 console.print(f"[red]Failed: {e}[/red]")
 
