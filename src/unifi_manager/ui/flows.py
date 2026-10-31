@@ -266,6 +266,18 @@ def preview_policies(
     console.print()
 
 
+def _policies_match(existing: dict, candidate: dict) -> bool:
+    """Return True if two policies are functionally identical (ignoring name/description)."""
+    return (
+        existing.get("source", {}).get("zoneId") == candidate["source"]["zoneId"]
+        and existing.get("destination", {}).get("zoneId") == candidate["destination"]["zoneId"]
+        and existing.get("ipProtocolScope") == candidate["ipProtocolScope"]
+        and existing.get("destination", {}).get("trafficFilter") == candidate["destination"].get("trafficFilter")
+        and existing.get("action", {}).get("type") == candidate["action"]["type"]
+        and existing.get("enabled") == candidate["enabled"]
+    )
+
+
 # ---------------------------------------------------------------------------
 # Flows
 # ---------------------------------------------------------------------------
@@ -404,8 +416,12 @@ def flow_create_rules(client: UnifiClient) -> None:
 
     dest_traffic_filter = build_dest_traffic_filter(dest_ip, port_filter)
 
+    # Fetch existing policies once for duplicate detection
+    with console.status("Fetching existing policies for duplicate check..."):
+        existing_policies = client.get_policies()
+
     console.print()
-    created, failed = 0, 0
+    created, skipped, replaced, failed = 0, 0, 0, 0
     for sz in source_zones:
         for dz in dest_zones:
             policy_name = f"{rule_name} | {sz['name']} → {dz['name']}"
@@ -417,15 +433,62 @@ def flow_create_rules(client: UnifiClient) -> None:
                 ip_scope=ip_scope,
                 dest_traffic_filter=dest_traffic_filter,
             )
+
+            # Check for exact name match — already exists, skip
+            exact = next(
+                (p for p in existing_policies if p.get("name") == policy_name), None
+            )
+            if exact:
+                console.print(f"  [dim]─[/dim] {policy_name} [dim](already exists, skipped)[/dim]")
+                skipped += 1
+                continue
+
+            # Check for functional duplicate with a different name
+            duplicate = next(
+                (p for p in existing_policies
+                 if _policies_match(p, policy)
+                 and p.get("metadata", {}).get("origin") == "USER_DEFINED"),
+                None,
+            )
+
             try:
-                client.create_policy(policy)
+                result = client.create_policy(policy)
+                new_id = result.get("id")
                 console.print(f"  [green]✓[/green] {policy_name}")
                 created += 1
+
+                if duplicate and new_id:
+                    # Verify new policy exists before removing old one
+                    try:
+                        client.get_policy(new_id)
+                        client.delete_policy(duplicate["id"])
+                        console.print(
+                            f"    [yellow]↳ Replaced '[/yellow]{duplicate['name']}[yellow]' "
+                            f"(same rule, different name)[/yellow]"
+                        )
+                        replaced += 1
+                        # Update local cache so subsequent iterations see the deletion
+                        existing_policies = [p for p in existing_policies if p["id"] != duplicate["id"]]
+                    except UnifiAPIError as e:
+                        console.print(
+                            f"    [red]↳ Could not remove old policy '{duplicate['name']}': {e}[/red]"
+                        )
+
+                # Add new policy to local cache
+                existing_policies.append(result)
+
             except UnifiAPIError as e:
                 console.print(f"  [red]✗[/red] {policy_name}: {e}")
                 failed += 1
 
-    console.print(f"\n[bold]Done:[/bold] {created} created, {failed} failed.")
+    parts = [f"{created} created"]
+    if replaced:
+        parts.append(f"{replaced} replaced")
+    if skipped:
+        parts.append(f"{skipped} skipped (already existed)")
+    if failed:
+        parts.append(f"{failed} failed")
+    console.print(f"\n[bold]Done:[/bold] {', '.join(parts)}.")  
 
 
 def flow_extend_rules(client: UnifiClient) -> None:

@@ -161,6 +161,19 @@ class UnifiClient:
     def create_policy(self, policy: dict) -> dict:
         return self._post(self._site_path("/firewall/policies"), policy)
 
+    def delete_policy(self, policy_id: str) -> None:
+        resp = self.session.delete(
+            f"{self.integration}{self._site_path(f'/firewall/policies/{policy_id}')}",
+            timeout=10,
+        )
+        if resp.status_code != 200:
+            raise UnifiAPIError(
+                f"DELETE policy failed ({resp.status_code}): {resp.text}"
+            )
+
+    def get_policy(self, policy_id: str) -> dict:
+        return self._get(self._site_path(f"/firewall/policies/{policy_id}"))
+
     def get_traffic_matching_lists(self) -> list[dict]:
         return self._get_all(self._site_path("/traffic-matching-lists"))
 
