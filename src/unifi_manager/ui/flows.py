@@ -90,18 +90,21 @@ def _proto_label(protocol: str, ports: list[int], port_list_name: str | None) ->
 def build_ip_scope(protocol: str) -> dict:
     if protocol == "any":
         return {"ipVersion": "IPV4"}
-    proto_name = {"tcp": "tcp", "udp": "udp", "tcp+udp": "tcp_udp"}[protocol]
-    if proto_name == "tcp_udp":
+    if protocol == "tcp+udp":
         return {
             "ipVersion": "IPV4",
-            "protocolFilter": {"type": "PRESET", "preset": {"name": "TCP_UDP"}},
+            "protocolFilter": {
+                "type": "PRESET",
+                "preset": {"name": "TCP_UDP"},
+            },
         }
+    # TCP and UDP use NAMED_PROTOCOL with uppercase name
     return {
         "ipVersion": "IPV4",
         "protocolFilter": {
             "type": "NAMED_PROTOCOL",
             "matchOpposite": False,
-            "protocol": {"name": proto_name},
+            "protocol": {"name": protocol.upper()},
         },
     }
 
