@@ -115,7 +115,7 @@ def prompt_connection() -> tuple[str, str]:
             console.print("[dim]API key saved to system keychain.[/dim]")
     else:
         console.print(
-            "[dim]Install 'keyring' to save the API key securely between sessions.[/dim]"
+            "[dim]API key not saved — no supported keychain available in this environment.[/dim]"
         )
 
     return host, api_key.strip()
