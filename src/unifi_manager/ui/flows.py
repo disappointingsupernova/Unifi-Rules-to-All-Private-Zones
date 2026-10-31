@@ -735,8 +735,9 @@ def flow_cleanup_duplicates(client: UnifiClient) -> None:
 
 
 def flow_list_policies(client: UnifiClient) -> None:
-    with console.status("Fetching policies..."):
-        policies = client.get_policies()
+    with _make_progress() as progress:
+        t_pol = progress.add_task("Fetching policies...", total=None)
+        policies = client.get_policies(progress, t_pol)
     if not policies:
         console.print("[yellow]No policies found.[/yellow]")
         return
@@ -761,8 +762,10 @@ def flow_list_policies(client: UnifiClient) -> None:
 
 def flow_manage_port_lists(client: UnifiClient) -> None:
     while True:
-        with console.status("Fetching port lists..."):
+        with _make_progress() as progress:
+            t_lists = progress.add_task("Fetching port lists...", total=None)
             all_lists = client.get_traffic_matching_lists()
+            progress.update(t_lists, total=len(all_lists), completed=len(all_lists))
         port_lists = [l for l in all_lists if l.get("type") == "PORTS"]
 
         action = questionary.select(
