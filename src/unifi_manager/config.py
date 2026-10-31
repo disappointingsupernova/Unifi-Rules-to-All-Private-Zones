@@ -42,13 +42,13 @@ def load_clusters() -> dict[str, list[str]]:
 
 
 def load_excluded_zones() -> set[str]:
-    """Return zone names that should be hidden from bulk zone pickers."""
+    """Return zone names that should be hidden from bulk zone pickers (case-insensitive)."""
     _ensure_config()
     if not CONFIG_PATH.exists():
         return set()
     with open(CONFIG_PATH) as f:
         data = yaml.safe_load(f) or {}
-    return {str(z).strip() for z in (data.get("excluded_zones") or [])}
+    return {str(z).strip().lower() for z in (data.get("excluded_zones") or [])}
 
 
 def load_controller_defaults() -> dict[str, str]:

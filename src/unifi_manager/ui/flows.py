@@ -67,8 +67,8 @@ def pick_zones(zones: list[dict], message: str, allow_excluded: bool = False) ->
     clusters = load_clusters()
     excluded = load_excluded_zones()
 
-    safe_zones = [z for z in zones if z["name"] not in excluded]
-    excluded_present = [z for z in zones if z["name"] in excluded]
+    safe_zones = [z for z in zones if z["name"].lower() not in excluded]
+    excluded_present = [z for z in zones if z["name"].lower() in excluded]
 
     if excluded_present and not allow_excluded:
         console.print(
