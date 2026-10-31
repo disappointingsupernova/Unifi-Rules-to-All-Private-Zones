@@ -402,9 +402,8 @@ def flow_extend_rules(client: UnifiClient) -> None:
     ]
 
     if not tool_policies:
-        console.print(
-            f"[yellow]No policies stamped with '{TOOL_SIGNATURE}' found.[/yellow]"
-        )
+        sig = TOOL_SIGNATURE.replace("[", "\\[")  # escape rich markup
+        console.print(f"[yellow]No policies stamped with '{sig}' found.[/yellow]")
         if not user_policies:
             console.print("[yellow]No user-defined policies found at all.[/yellow]")
             return
