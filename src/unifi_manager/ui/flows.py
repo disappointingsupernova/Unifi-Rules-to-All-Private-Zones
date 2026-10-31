@@ -417,8 +417,9 @@ def flow_create_rules(client: UnifiClient) -> None:
     dest_traffic_filter = build_dest_traffic_filter(dest_ip, port_filter)
 
     # Fetch existing policies once for duplicate detection
-    with console.status("Fetching existing policies for duplicate check..."):
-        existing_policies = client.get_policies()
+    with _make_progress() as progress:
+        t_existing = progress.add_task("Checking for existing policies...", total=None)
+        existing_policies = client.get_policies(progress, t_existing)
 
     console.print()
     created, skipped, replaced, failed = 0, 0, 0, 0
