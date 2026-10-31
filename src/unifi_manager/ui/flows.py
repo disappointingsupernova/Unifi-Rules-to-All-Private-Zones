@@ -113,7 +113,7 @@ def build_port_filter_inline(ports: list[int]) -> dict:
     return {
         "type": "PORTS",
         "matchOpposite": False,
-        "items": [{"type": "SINGLE", "value": p} for p in ports],
+        "items": [{"type": "PORT_NUMBER", "portNumber": p} for p in ports],
     }
 
 
@@ -423,8 +423,8 @@ def flow_manage_port_lists(client: UnifiClient) -> None:
             t.add_column("ID", style="dim")
             for l in port_lists:
                 port_strs = [
-                    str(item["value"]) if item.get("type") == "SINGLE"
-                    else f"{item['start']}-{item['end']}"
+                    str(item["portNumber"]) if item.get("type") == "PORT_NUMBER"
+                    else f"{item['portRangeStart']}-{item['portRangeEnd']}"
                     for item in l.get("items", [])
                 ]
                 t.add_row(l["name"], ", ".join(port_strs), l["id"])
@@ -446,9 +446,9 @@ def flow_manage_port_lists(client: UnifiClient) -> None:
                     part = part.strip()
                     if "-" in part:
                         start, end = part.split("-", 1)
-                        items.append({"type": "RANGE", "start": int(start), "end": int(end)})
+                        items.append({"type": "PORT_NUMBER_RANGE", "portRangeStart": int(start), "portRangeEnd": int(end)})
                     else:
-                        items.append({"type": "SINGLE", "value": int(part)})
+                        items.append({"type": "PORT_NUMBER", "portNumber": int(part)})
             except ValueError:
                 console.print("[red]Invalid port format.[/red]")
                 continue
@@ -457,10 +457,10 @@ def flow_manage_port_lists(client: UnifiClient) -> None:
             t.add_column("Type")
             t.add_column("Value")
             for item in items:
-                if item["type"] == "SINGLE":
-                    t.add_row("Single", str(item["value"]))
+                if item["type"] == "PORT_NUMBER":
+                    t.add_row("Single", str(item["portNumber"]))
                 else:
-                    t.add_row("Range", f"{item['start']} – {item['end']}")
+                    t.add_row("Range", f"{item['portRangeStart']} – {item['portRangeEnd']}")
             console.print(t)
 
             if not questionary.confirm(
