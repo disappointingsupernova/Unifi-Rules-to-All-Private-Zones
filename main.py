@@ -13,17 +13,10 @@ The legacy backup endpoint still uses session-cookie auth, so username
 and password are only prompted when performing a backup.
 """
 
-import os
-import sys
-
-# Must be set before any keyring import to prevent SIGFPE on WSL/headless Linux
-# where dbus is not running. The env var tells keyring to skip backend discovery.
-if sys.platform == "linux" and not os.environ.get("DBUS_SESSION_BUS_ADDRESS"):
-    os.environ["PYTHON_KEYRING_BACKEND"] = "keyring.backends.null.Keyring"
-
-import ctypes
 import getpass
+import os
 import signal
+import sys
 
 import questionary
 from rich.console import Console
@@ -51,19 +44,6 @@ console = Console()
 
 # Module-level reference so signal handlers can reach the client
 _client: UnifiClient | None = None
-
-
-def _zero_string(s: str) -> None:
-    """Best-effort overwrite of a string's internal buffer in CPython.
-
-    Python strings are immutable and interned, so this is not guaranteed,
-    but it reduces the window during which a secret sits in readable memory.
-    """
-    try:
-        buf = (ctypes.c_char * len(s)).from_address(id(s) + object.__basicsize__)  # type: ignore[attr-defined]
-        buf[:] = b"\x00" * len(s)
-    except Exception:
-        pass
 
 
 def _shutdown(signum: int, frame: object) -> None:
@@ -144,7 +124,6 @@ def main() -> None:
 
     try:
         _client.set_api_key(api_key)
-        _zero_string(api_key)  # Zero the local copy — keychain holds the canonical one
 
         with console.status("Connecting..."):
             sites = _client.get_sites()
@@ -213,8 +192,6 @@ def main() -> None:
                         flow_backup(_client)
                     except UnifiAPIError as e:
                         console.print(f"[red]Backup login failed: {e}[/red]")
-                    finally:
-                        _zero_string(password)  # Zero password immediately after use
             elif action == "Manage zone clusters":
                 flow_manage_clusters(zones)
             elif action == "Forget stored API key":
