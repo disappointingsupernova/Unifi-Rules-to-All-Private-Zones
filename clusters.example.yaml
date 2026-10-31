@@ -14,6 +14,17 @@ controller:
                           # API key is NEVER stored here — prompted at runtime.
                           # Create an API key: Settings → Control Plane → Integrations
 
+# Zones excluded from bulk/mass rule operations.
+# These zones will be hidden from the zone picker unless you choose to
+# include them explicitly at selection time.
+# Zone names must match exactly what appears in your UniFi controller.
+excluded_zones:
+  - External
+  - Gateway
+  - VPN
+  - Hotspot
+  - DMZ
+
 # Zone clusters — group zones by name for easy bulk rule creation.
 # Zone names must match exactly what appears in your UniFi controller.
 # You can also create and edit clusters from within the tool itself.

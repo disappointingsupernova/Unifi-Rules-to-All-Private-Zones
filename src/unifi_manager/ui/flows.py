@@ -13,7 +13,7 @@ from rich.rule import Rule
 from rich.table import Table
 
 from src.unifi_manager.api import UnifiClient, UnifiAPIError
-from src.unifi_manager.config import load_clusters, save_clusters
+from src.unifi_manager.config import load_clusters, load_excluded_zones, save_clusters
 from src.unifi_manager.crypto import decrypt_backup, encrypt_backup
 
 console = Console()
@@ -62,10 +62,24 @@ def display_zones(zones: list[dict]) -> None:
     console.print(t)
 
 
-def pick_zones(zones: list[dict], message: str) -> list[dict]:
-    """Checkbox picker — also surfaces clusters as selectable options."""
+def pick_zones(zones: list[dict], message: str, allow_excluded: bool = False) -> list[dict]:
+    """Checkbox picker — filters excluded zones by default, surfaces clusters."""
     clusters = load_clusters()
-    options = [z["name"] for z in zones]
+    excluded = load_excluded_zones()
+
+    safe_zones = [z for z in zones if z["name"] not in excluded]
+    excluded_present = [z for z in zones if z["name"] in excluded]
+
+    if excluded_present and not allow_excluded:
+        console.print(
+            f"  [dim]{len(excluded_present)} zone(s) hidden by exclusion list "
+            f"({', '.join(z['name'] for z in excluded_present)}). "
+            f"Edit excluded_zones in clusters.yaml to change this.[/dim]"
+        )
+
+    working_zones = zones if allow_excluded else safe_zones
+
+    options = [z["name"] for z in working_zones]
     if clusters:
         options += [f"[CLUSTER] {name}" for name in clusters]
 
@@ -338,7 +352,13 @@ def flow_create_rules(client: UnifiClient) -> None:
     )
 
     console.print(Rule("[dim]Step 4 — Source zones[/dim]"))
-    source_zones = pick_zones(zones, "Select SOURCE zones (where traffic originates):")
+    include_excluded = questionary.confirm(
+        "Include excluded zones (External, Gateway, VPN etc.)?", default=False
+    ).ask()
+    source_zones = pick_zones(
+        zones, "Select SOURCE zones (where traffic originates):",
+        allow_excluded=include_excluded,
+    )
     if not source_zones:
         console.print("[yellow]No source zones selected.[/yellow]")
         return
@@ -347,7 +367,10 @@ def flow_create_rules(client: UnifiClient) -> None:
     )
 
     console.print(Rule("[dim]Step 5 — Destination zones[/dim]"))
-    dest_zones = pick_zones(zones, "Select DESTINATION zones (where traffic is going):")
+    dest_zones = pick_zones(
+        zones, "Select DESTINATION zones (where traffic is going):",
+        allow_excluded=include_excluded,
+    )
     if not dest_zones:
         console.print("[yellow]No destination zones selected.[/yellow]")
         return
@@ -488,7 +511,13 @@ def flow_extend_rules(client: UnifiClient) -> None:
         console.print("[yellow]All zones are already covered by this rule group.[/yellow]")
         return
 
-    new_source_zones = pick_zones(available_zones, "Select additional SOURCE zones to extend to:")
+    include_excluded = questionary.confirm(
+        "Include excluded zones (External, Gateway, VPN etc.)?", default=False
+    ).ask()
+    new_source_zones = pick_zones(
+        available_zones, "Select additional SOURCE zones to extend to:",
+        allow_excluded=include_excluded,
+    )
     if not new_source_zones:
         console.print("[yellow]No zones selected.[/yellow]")
         return

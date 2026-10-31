@@ -4,7 +4,12 @@ import shutil
 import yaml
 from pathlib import Path
 
+import sys
+
 try:
+    # Only attempt keyring on Windows and macOS — Linux/WSL dbus causes SIGFPE
+    if sys.platform not in ("win32", "darwin"):
+        raise ImportError("keyring disabled on this platform")
     import keyring
     _backend_name = type(keyring.get_keyring()).__module__
     _KEYRING_AVAILABLE = not any(
@@ -34,6 +39,16 @@ def load_clusters() -> dict[str, list[str]]:
     with open(CONFIG_PATH) as f:
         data = yaml.safe_load(f) or {}
     return data.get("clusters", {})
+
+
+def load_excluded_zones() -> set[str]:
+    """Return zone names that should be hidden from bulk zone pickers."""
+    _ensure_config()
+    if not CONFIG_PATH.exists():
+        return set()
+    with open(CONFIG_PATH) as f:
+        data = yaml.safe_load(f) or {}
+    return {str(z).strip() for z in (data.get("excluded_zones") or [])}
 
 
 def load_controller_defaults() -> dict[str, str]:
