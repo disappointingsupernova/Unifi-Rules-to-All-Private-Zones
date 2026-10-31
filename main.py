@@ -35,6 +35,7 @@ from src.unifi_manager.ui.flows import (
     flow_backup,
     flow_create_rules,
     flow_decrypt_backup,
+    flow_extend_rules,
     flow_list_policies,
     flow_manage_clusters,
     flow_manage_port_lists,
@@ -162,6 +163,7 @@ def main() -> None:
                 "Main menu:",
                 choices=[
                     "Create firewall rules across zones",
+                    "Extend existing rules to more zones",
                     "List existing policies",
                     "Manage port lists",
                     "Backup site config",
@@ -173,6 +175,8 @@ def main() -> None:
 
             if action == "Create firewall rules across zones":
                 flow_create_rules(_client)
+            elif action == "Extend existing rules to more zones":
+                flow_extend_rules(_client)
             elif action == "List existing policies":
                 flow_list_policies(_client)
             elif action == "Manage port lists":

@@ -16,6 +16,9 @@ from src.unifi_manager.crypto import decrypt_backup, encrypt_backup
 
 console = Console()
 
+# Embedded in every policy description so tool-created rules are identifiable
+TOOL_SIGNATURE = "[unifi-zone-manager]"
+
 
 # ---------------------------------------------------------------------------
 # Shared helpers
@@ -256,7 +259,8 @@ def flow_create_rules(client: UnifiClient) -> None:
     rule_name = questionary.text("Rule name prefix (e.g. 'Allow Syslog'):").ask()
     if not rule_name:
         return
-    description = questionary.text("Description (optional):").ask() or ""
+    user_description = questionary.text("Description (optional):").ask() or ""
+    description = f"{user_description} {TOOL_SIGNATURE}".strip()
 
     console.print(Rule("[dim]Step 2 — Protocol & ports[/dim]"))
     protocol = questionary.select(
@@ -360,6 +364,134 @@ def flow_create_rules(client: UnifiClient) -> None:
     for sz in source_zones:
         for dz in dest_zones:
             policy_name = f"{rule_name} | {sz['name']} → {dz['name']}"
+            policy = build_policy(
+                name=policy_name,
+                description=description,
+                source_zone_id=sz["id"],
+                dest_zone_id=dz["id"],
+                ip_scope=ip_scope,
+                dest_traffic_filter=dest_traffic_filter,
+            )
+            try:
+                client.create_policy(policy)
+                console.print(f"  [green]✓[/green] {policy_name}")
+                created += 1
+            except UnifiAPIError as e:
+                console.print(f"  [red]✗[/red] {policy_name}: {e}")
+                failed += 1
+
+    console.print(f"\n[bold]Done:[/bold] {created} created, {failed} failed.")
+
+
+def flow_extend_rules(client: UnifiClient) -> None:
+    """Find tool-created policies and extend them to additional source zones."""
+    with console.status("Fetching policies and zones..."):
+        all_policies = client.get_policies()
+        zones = client.get_zones()
+
+    # Only show policies created by this tool
+    tool_policies = [
+        p for p in all_policies
+        if TOOL_SIGNATURE in (p.get("description") or "")
+    ]
+
+    if not tool_policies:
+        console.print(
+            f"[yellow]No policies created by this tool found.\n"
+            f"Tool-created policies contain '{TOOL_SIGNATURE}' in their description.[/yellow]"
+        )
+        return
+
+    # Group by rule prefix (everything before " | ")
+    groups: dict[str, list[dict]] = {}
+    for p in tool_policies:
+        prefix = p["name"].split(" | ")[0].strip()
+        groups.setdefault(prefix, []).append(p)
+
+    # Display grouped summary
+    t = Table(title=f"Tool-managed Rule Groups ({len(groups)})", show_lines=True)
+    t.add_column("#", style="dim", width=4)
+    t.add_column("Rule Group", style="cyan")
+    t.add_column("Policies", justify="right", style="green")
+    t.add_column("Dest Zone IDs", style="dim")
+    for i, (prefix, policies) in enumerate(groups.items(), 1):
+        dest_ids = ", ".join({p["destination"]["zoneId"] for p in policies})
+        t.add_row(str(i), prefix, str(len(policies)), dest_ids)
+    console.print(t)
+
+    # Pick a group to extend
+    group_choices = list(groups.keys())
+    selected_group = questionary.select(
+        "Select rule group to extend to additional source zones:",
+        choices=group_choices,
+    ).ask()
+    if not selected_group:
+        return
+
+    template_policies = groups[selected_group]
+
+    # Show what the existing rules look like
+    zone_id_map = {z["id"]: z["name"] for z in zones}
+    existing_source_ids = {p["source"]["zoneId"] for p in template_policies}
+    existing_dest_ids = {p["destination"]["zoneId"] for p in template_policies}
+
+    console.print(f"\n[bold]Existing source zones:[/bold] "
+        + ", ".join(f"[green]{zone_id_map.get(i, i)}[/green]" for i in existing_source_ids))
+    console.print(f"[bold]Destination zones:[/bold] "
+        + ", ".join(f"[blue]{zone_id_map.get(i, i)}[/blue]" for i in existing_dest_ids))
+
+    # Pick additional source zones — exclude already-covered ones
+    available_zones = [z for z in zones if z["id"] not in existing_source_ids]
+    if not available_zones:
+        console.print("[yellow]All zones are already covered by this rule group.[/yellow]")
+        return
+
+    new_source_zones = pick_zones(available_zones, "Select additional SOURCE zones to extend to:")
+    if not new_source_zones:
+        console.print("[yellow]No zones selected.[/yellow]")
+        return
+
+    # Use the first template policy to clone ipProtocolScope, trafficFilter, description
+    template = template_policies[0]
+    ip_scope = template["ipProtocolScope"]
+    description = template.get("description", TOOL_SIGNATURE)
+
+    # Preview
+    dest_zones = [z for z in zones if z["id"] in existing_dest_ids]
+    total = len(new_source_zones) * len(dest_zones)
+    console.print()
+    console.print(Rule("[bold]Extension Preview[/bold]"))
+    pt = Table(show_lines=True, expand=False)
+    pt.add_column("#", style="dim", width=4)
+    pt.add_column("Policy Name", style="cyan")
+    pt.add_column("Source Zone", style="green")
+    pt.add_column("Destination Zone", style="blue")
+    n = 1
+    for sz in new_source_zones:
+        for dz in dest_zones:
+            pt.add_row(
+                str(n),
+                f"{selected_group} | {sz['name']} \u2192 {dz['name']}",
+                sz["name"],
+                dz["name"],
+            )
+            n += 1
+    console.print(pt)
+
+    if not questionary.confirm(f"Create {total} new policies?", default=False).ask():
+        console.print("[dim]Aborted.[/dim]")
+        return
+
+    created, failed = 0, 0
+    for sz in new_source_zones:
+        for dz in dest_zones:
+            policy_name = f"{selected_group} | {sz['name']} \u2192 {dz['name']}"
+            # Clone destination trafficFilter from the matching dest zone template
+            matching = next(
+                (p for p in template_policies if p["destination"]["zoneId"] == dz["id"]),
+                template,
+            )
+            dest_traffic_filter = matching["destination"].get("trafficFilter")
             policy = build_policy(
                 name=policy_name,
                 description=description,
