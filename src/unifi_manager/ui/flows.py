@@ -389,34 +389,50 @@ def flow_extend_rules(client: UnifiClient) -> None:
         all_policies = client.get_policies()
         zones = client.get_zones()
 
-    # Only show policies created by this tool
+    zone_id_map = {z["id"]: z["name"] for z in zones}
+
+    # Filter to tool-created policies, but offer fallback to all USER_DEFINED
     tool_policies = [
         p for p in all_policies
         if TOOL_SIGNATURE in (p.get("description") or "")
     ]
+    user_policies = [
+        p for p in all_policies
+        if p.get("metadata", {}).get("origin") == "USER_DEFINED"
+    ]
 
     if not tool_policies:
         console.print(
-            f"[yellow]No policies created by this tool found.\n"
-            f"Tool-created policies contain '{TOOL_SIGNATURE}' in their description.[/yellow]"
+            f"[yellow]No policies stamped with '{TOOL_SIGNATURE}' found.[/yellow]"
         )
-        return
+        if not user_policies:
+            console.print("[yellow]No user-defined policies found at all.[/yellow]")
+            return
+        if not questionary.confirm(
+            "Show all user-defined policies instead?", default=True
+        ).ask():
+            return
+        candidate_policies = user_policies
+    else:
+        candidate_policies = tool_policies
 
     # Group by rule prefix (everything before " | ")
     groups: dict[str, list[dict]] = {}
-    for p in tool_policies:
+    for p in candidate_policies:
         prefix = p["name"].split(" | ")[0].strip()
         groups.setdefault(prefix, []).append(p)
 
     # Display grouped summary
-    t = Table(title=f"Tool-managed Rule Groups ({len(groups)})", show_lines=True)
+    t = Table(title=f"Rule Groups ({len(groups)})", show_lines=True)
     t.add_column("#", style="dim", width=4)
     t.add_column("Rule Group", style="cyan")
     t.add_column("Policies", justify="right", style="green")
-    t.add_column("Dest Zone IDs", style="dim")
+    t.add_column("Source Zones", style="dim")
+    t.add_column("Dest Zones", style="dim")
     for i, (prefix, policies) in enumerate(groups.items(), 1):
-        dest_ids = ", ".join({p["destination"]["zoneId"] for p in policies})
-        t.add_row(str(i), prefix, str(len(policies)), dest_ids)
+        src_names = ", ".join({zone_id_map.get(p["source"]["zoneId"], "?") for p in policies})
+        dst_names = ", ".join({zone_id_map.get(p["destination"]["zoneId"], "?") for p in policies})
+        t.add_row(str(i), prefix, str(len(policies)), src_names, dst_names)
     console.print(t)
 
     # Pick a group to extend
@@ -430,8 +446,6 @@ def flow_extend_rules(client: UnifiClient) -> None:
 
     template_policies = groups[selected_group]
 
-    # Show what the existing rules look like
-    zone_id_map = {z["id"]: z["name"] for z in zones}
     existing_source_ids = {p["source"]["zoneId"] for p in template_policies}
     existing_dest_ids = {p["destination"]["zoneId"] for p in template_policies}
 
