@@ -87,6 +87,19 @@ class UnifiClient:
             raise UnifiAPIError(f"POST {path} failed ({resp.status_code}): {resp.text}")
         return resp.json()
 
+    def _get_all(self, path: str, page_size: int = 200) -> list[dict]:
+        """Fetch all pages from a paginated endpoint."""
+        results: list[dict] = []
+        offset = 0
+        while True:
+            data = self._get(path, params={"limit": page_size, "offset": offset})
+            page = data.get("data", [])
+            results.extend(page)
+            if len(results) >= data.get("totalCount", 0):
+                break
+            offset += page_size
+        return results
+
     def get_sites(self) -> list[dict]:
         data = self._get("/v1/sites")
         return data.get("data", [])
@@ -100,19 +113,16 @@ class UnifiClient:
         return f"/v1/sites/{self.site_id}{path}"
 
     def get_zones(self) -> list[dict]:
-        data = self._get(self._site_path("/firewall/zones"), params={"limit": 200})
-        return data.get("data", [])
+        return self._get_all(self._site_path("/firewall/zones"))
 
     def get_policies(self) -> list[dict]:
-        data = self._get(self._site_path("/firewall/policies"), params={"limit": 200})
-        return data.get("data", [])
+        return self._get_all(self._site_path("/firewall/policies"))
 
     def create_policy(self, policy: dict) -> dict:
         return self._post(self._site_path("/firewall/policies"), policy)
 
     def get_traffic_matching_lists(self) -> list[dict]:
-        data = self._get(self._site_path("/traffic-matching-lists"), params={"limit": 200})
-        return data.get("data", [])
+        return self._get_all(self._site_path("/traffic-matching-lists"))
 
     def get_traffic_matching_list(self, list_id: str) -> dict:
         return self._get(self._site_path(f"/traffic-matching-lists/{list_id}"))
