@@ -88,16 +88,29 @@ class UnifiClient:
         return resp.json()
 
     def _get_all(self, path: str, page_size: int = 200) -> list[dict]:
-        """Fetch all pages from a paginated endpoint."""
-        results: list[dict] = []
-        offset = 0
-        while True:
-            data = self._get(path, params={"limit": page_size, "offset": offset})
-            page = data.get("data", [])
-            results.extend(page)
-            if len(results) >= data.get("totalCount", 0):
-                break
-            offset += page_size
+        """Fetch all pages from a paginated endpoint, parallelising after the first page."""
+        first = self._get(path, params={"limit": page_size, "offset": 0})
+        results: list[dict] = list(first.get("data", []))
+        total = first.get("totalCount", 0)
+
+        if total <= page_size:
+            return results
+
+        offsets = list(range(page_size, total, page_size))
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        with ThreadPoolExecutor(max_workers=min(8, len(offsets))) as pool:
+            futures = {
+                pool.submit(self._get, path, params={"limit": page_size, "offset": o}): o
+                for o in offsets
+            }
+            pages: dict[int, list[dict]] = {}
+            for future in as_completed(futures):
+                offset = futures[future]
+                pages[offset] = future.result().get("data", [])
+
+        for o in sorted(offsets):
+            results.extend(pages[o])
+
         return results
 
     def get_sites(self) -> list[dict]:

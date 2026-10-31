@@ -244,9 +244,13 @@ def preview_policies(
 # ---------------------------------------------------------------------------
 
 def flow_create_rules(client: UnifiClient) -> None:
+    from concurrent.futures import ThreadPoolExecutor
     with console.status("Fetching zones and port lists..."):
-        zones = client.get_zones()
-        all_lists = client.get_traffic_matching_lists()
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            f_zones = pool.submit(client.get_zones)
+            f_lists = pool.submit(client.get_traffic_matching_lists)
+            zones = f_zones.result()
+            all_lists = f_lists.result()
         port_lists = [l for l in all_lists if l.get("type") == "PORTS"]
 
     display_zones(zones)
@@ -386,9 +390,13 @@ def flow_create_rules(client: UnifiClient) -> None:
 
 def flow_extend_rules(client: UnifiClient) -> None:
     """Find tool-created policies and extend them to additional source zones."""
+    from concurrent.futures import ThreadPoolExecutor
     with console.status("Fetching policies and zones..."):
-        all_policies = client.get_policies()
-        zones = client.get_zones()
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            f_policies = pool.submit(client.get_policies)
+            f_zones = pool.submit(client.get_zones)
+            all_policies = f_policies.result()
+            zones = f_zones.result()
 
     zone_id_map = {z["id"]: z["name"] for z in zones}
 
