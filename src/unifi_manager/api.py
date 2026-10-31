@@ -73,11 +73,26 @@ class UnifiClient:
         except Exception:
             pass
 
-    def _get(self, path: str, **kwargs) -> dict:
-        resp = self.session.get(f"{self.integration}{path}", timeout=10, **kwargs)
-        if resp.status_code != 200:
-            raise UnifiAPIError(f"GET {path} failed ({resp.status_code}): {resp.text}")
-        return resp.json()
+    def _get(self, path: str, retries: int = 3, **kwargs) -> dict:
+        last_err: Exception | None = None
+        for attempt in range(retries):
+            try:
+                resp = self.session.get(
+                    f"{self.integration}{path}", timeout=30, **kwargs
+                )
+                if resp.status_code != 200:
+                    raise UnifiAPIError(
+                        f"GET {path} failed ({resp.status_code}): {resp.text}"
+                    )
+                return resp.json()
+            except UnifiAPIError:
+                raise
+            except Exception as e:
+                last_err = e
+                if attempt < retries - 1:
+                    import time
+                    time.sleep(1 * (attempt + 1))
+        raise UnifiAPIError(f"GET {path} failed after {retries} attempts: {last_err}")
 
     def _post(self, path: str, payload: dict) -> dict:
         resp = self.session.post(
@@ -87,18 +102,24 @@ class UnifiClient:
             raise UnifiAPIError(f"POST {path} failed ({resp.status_code}): {resp.text}")
         return resp.json()
 
-    def _get_all(self, path: str, page_size: int = 200) -> list[dict]:
+    def _get_all(self, path: str, page_size: int = 200, progress=None, task_id=None) -> list[dict]:
         """Fetch all pages from a paginated endpoint, parallelising after the first page."""
         first = self._get(path, params={"limit": page_size, "offset": 0})
         results: list[dict] = list(first.get("data", []))
         total = first.get("totalCount", 0)
 
+        if progress and task_id is not None:
+            progress.update(task_id, total=total, completed=len(results))
+
         if total <= page_size:
+            if progress and task_id is not None:
+                progress.update(task_id, completed=total)
             return results
 
         offsets = list(range(page_size, total, page_size))
+        # Limit concurrency to 3 — UDM Pro struggles with more simultaneous connections
         from concurrent.futures import ThreadPoolExecutor, as_completed
-        with ThreadPoolExecutor(max_workers=min(8, len(offsets))) as pool:
+        with ThreadPoolExecutor(max_workers=3) as pool:
             futures = {
                 pool.submit(self._get, path, params={"limit": page_size, "offset": o}): o
                 for o in offsets
@@ -107,6 +128,8 @@ class UnifiClient:
             for future in as_completed(futures):
                 offset = futures[future]
                 pages[offset] = future.result().get("data", [])
+                if progress and task_id is not None:
+                    progress.advance(task_id, len(pages[offset]))
 
         for o in sorted(offsets):
             results.extend(pages[o])
@@ -128,8 +151,12 @@ class UnifiClient:
     def get_zones(self) -> list[dict]:
         return self._get_all(self._site_path("/firewall/zones"))
 
-    def get_policies(self) -> list[dict]:
-        return self._get_all(self._site_path("/firewall/policies"))
+    def get_policies(self, progress=None, task_id=None) -> list[dict]:
+        return self._get_all(
+            self._site_path("/firewall/policies"),
+            progress=progress,
+            task_id=task_id,
+        )
 
     def create_policy(self, policy: dict) -> dict:
         return self._post(self._site_path("/firewall/policies"), policy)

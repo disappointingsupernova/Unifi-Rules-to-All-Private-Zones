@@ -8,6 +8,7 @@ import questionary
 from rich.console import Console
 from rich.markup import escape as markup_escape
 from rich.panel import Panel
+from rich.progress import Progress, SpinnerColumn, BarColumn, TaskProgressColumn, TextColumn
 from rich.rule import Rule
 from rich.table import Table
 
@@ -19,6 +20,18 @@ console = Console()
 
 # Embedded in every policy description so tool-created rules are identifiable
 TOOL_SIGNATURE = "[unifi-zone-manager]"
+
+
+def _make_progress() -> Progress:
+    return Progress(
+        SpinnerColumn(),
+        TextColumn("[bold cyan]{task.description}[/bold cyan]"),
+        BarColumn(),
+        TaskProgressColumn(),
+        TextColumn("[dim]{task.completed}/{task.total}[/dim]"),
+        console=console,
+        transient=True,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -245,13 +258,17 @@ def preview_policies(
 
 def flow_create_rules(client: UnifiClient) -> None:
     from concurrent.futures import ThreadPoolExecutor
-    with console.status("Fetching zones and port lists..."):
+    with _make_progress() as progress:
+        t_zones = progress.add_task("Fetching zones...", total=None)
+        t_lists = progress.add_task("Fetching port lists...", total=None)
         with ThreadPoolExecutor(max_workers=2) as pool:
             f_zones = pool.submit(client.get_zones)
             f_lists = pool.submit(client.get_traffic_matching_lists)
             zones = f_zones.result()
+            progress.update(t_zones, total=len(zones), completed=len(zones))
             all_lists = f_lists.result()
-        port_lists = [l for l in all_lists if l.get("type") == "PORTS"]
+            progress.update(t_lists, total=len(all_lists), completed=len(all_lists))
+    port_lists = [l for l in all_lists if l.get("type") == "PORTS"]
 
     display_zones(zones)
 
@@ -391,12 +408,16 @@ def flow_create_rules(client: UnifiClient) -> None:
 def flow_extend_rules(client: UnifiClient) -> None:
     """Find tool-created policies and extend them to additional source zones."""
     from concurrent.futures import ThreadPoolExecutor
-    with console.status("Fetching policies and zones..."):
+    with _make_progress() as progress:
+        t_policies = progress.add_task("Fetching policies...", total=None)
+        t_zones = progress.add_task("Fetching zones...", total=None)
         with ThreadPoolExecutor(max_workers=2) as pool:
-            f_policies = pool.submit(client.get_policies)
+            f_policies = pool.submit(client.get_policies, progress, t_policies)
             f_zones = pool.submit(client.get_zones)
-            all_policies = f_policies.result()
             zones = f_zones.result()
+            progress.update(t_zones, total=len(zones), completed=len(zones))
+            all_policies = f_policies.result()
+    console.print(f"[dim]Loaded {len(all_policies)} policies, {len(zones)} zones.[/dim]")
 
     zone_id_map = {z["id"]: z["name"] for z in zones}
 
