@@ -154,6 +154,21 @@ def build_port_filter_ref(list_id: str) -> dict:
     }
 
 
+def build_source_traffic_filter(source_ip: str) -> dict | None:
+    if not source_ip:
+        return None
+    return {
+        "type": "IP_ADDRESS",
+        "ipAddressFilter": {
+            "type": "IP_ADDRESSES",
+            "matchOpposite": False,
+            "items": [
+                {"type": "SUBNET" if "/" in source_ip else "IP_ADDRESS", "value": source_ip}
+            ],
+        },
+    }
+
+
 def build_dest_traffic_filter(dest_ip: str, port_filter: dict | None) -> dict | None:
     if dest_ip and port_filter:
         return {
@@ -190,6 +205,7 @@ def build_policy(
     dest_zone_id: str,
     ip_scope: dict,
     dest_traffic_filter: dict | None,
+    source_traffic_filter: dict | None = None,
 ) -> dict:
     policy: dict = {
         "name": name,
@@ -201,6 +217,8 @@ def build_policy(
         "source": {"zoneId": source_zone_id},
         "destination": {"zoneId": dest_zone_id},
     }
+    if source_traffic_filter:
+        policy["source"]["trafficFilter"] = source_traffic_filter
     if dest_traffic_filter:
         policy["destination"]["trafficFilter"] = dest_traffic_filter
     return policy
@@ -212,6 +230,7 @@ def preview_policies(
     protocol: str,
     ports: list[int],
     port_list_name: str | None,
+    source_ip: str,
     dest_ip: str,
     source_zones: list[dict],
     dest_zones: list[dict],
@@ -221,6 +240,7 @@ def preview_policies(
     console.print(Rule("[bold]Policy Preview[/bold]"))
 
     proto_label = _proto_label(protocol, ports, port_list_name)
+    src_label = source_ip if source_ip else "any"
     dest_label = dest_ip if dest_ip else "any"
     mode_label = (
         "[yellow bold]DRY RUN - nothing will be created[/yellow bold]"
@@ -232,6 +252,7 @@ def preview_policies(
         f"  Rule prefix : [cyan]{rule_name}[/cyan]\n"
         f"  Description : {description or '(none)'}\n"
         f"  Protocol    : [cyan]{proto_label}[/cyan]\n"
+        f"  Source IP   : [cyan]{src_label}[/cyan]\n"
         f"  Dest IP     : [cyan]{dest_label}[/cyan]\n"
         f"  Mode        : {mode_label}\n"
         f"  Policies    : [bold]{len(source_zones) * len(dest_zones)}[/bold] "
@@ -245,7 +266,8 @@ def preview_policies(
     t.add_column("Source Zone", style="green")
     t.add_column("Destination Zone", style="blue")
     t.add_column("Protocol", style="magenta")
-    t.add_column("Dest IP Filter", style="yellow")
+    t.add_column("Src IP", style="yellow")
+    t.add_column("Dest IP", style="yellow")
 
     for n, (sz, dz) in enumerate(
         ((sz, dz) for sz in source_zones for dz in dest_zones), 1
@@ -256,6 +278,7 @@ def preview_policies(
             sz["name"],
             dz["name"],
             proto_label,
+            src_label,
             dest_label,
         )
 
@@ -351,7 +374,15 @@ def flow_create_rules(client: UnifiClient) -> None:
             port_list_id = port_lists[idx]["id"]
             port_list_name = port_lists[idx]["name"]
 
-    console.print(Rule("[dim]Step 3 - Destination IP (optional)[/dim]"))
+    console.print(Rule("[dim]Step 3 - Source IP (optional)[/dim]"))
+    source_ip = (
+        questionary.text(
+            "Source IP or subnet (e.g. 10.10.20.5 or 10.10.20.0/24) - leave blank for any:"
+        ).ask()
+        or ""
+    )
+
+    console.print(Rule("[dim]Step 4 - Destination IP (optional)[/dim]"))
     dest_ip = (
         questionary.text(
             "Destination IP or subnet (e.g. 10.10.20.5 or 10.10.20.0/24) - leave blank for any:"
@@ -359,7 +390,7 @@ def flow_create_rules(client: UnifiClient) -> None:
         or ""
     )
 
-    console.print(Rule("[dim]Step 4 - Source zones[/dim]"))
+    console.print(Rule("[dim]Step 5 - Source zones[/dim]"))
     include_excluded = questionary.confirm(
         "Include excluded zones (External, Gateway, VPN etc.)?", default=False
     ).ask()
@@ -374,7 +405,7 @@ def flow_create_rules(client: UnifiClient) -> None:
         "  Selected: " + ", ".join(f"[green]{z['name']}[/green]" for z in source_zones)
     )
 
-    console.print(Rule("[dim]Step 5 - Destination zones[/dim]"))
+    console.print(Rule("[dim]Step 6 - Destination zones[/dim]"))
     dest_zones = pick_zones(
         zones, "Select DESTINATION zones (where traffic is going):",
         allow_excluded=include_excluded,
@@ -388,7 +419,7 @@ def flow_create_rules(client: UnifiClient) -> None:
 
     preview_policies(
         rule_name, description, protocol, ports, port_list_name,
-        dest_ip, source_zones, dest_zones, dry_run,
+        source_ip, dest_ip, source_zones, dest_zones, dry_run,
     )
 
     if dry_run:
@@ -411,6 +442,7 @@ def flow_create_rules(client: UnifiClient) -> None:
         port_filter = None
 
     dest_traffic_filter = build_dest_traffic_filter(dest_ip, port_filter)
+    source_traffic_filter = build_source_traffic_filter(source_ip)
 
     with _make_progress() as progress:
         t_existing = progress.add_task("Checking for existing policies...", total=None)
@@ -428,6 +460,7 @@ def flow_create_rules(client: UnifiClient) -> None:
                 dest_zone_id=dz["id"],
                 ip_scope=ip_scope,
                 dest_traffic_filter=dest_traffic_filter,
+                source_traffic_filter=source_traffic_filter,
             )
 
             exact = next(
