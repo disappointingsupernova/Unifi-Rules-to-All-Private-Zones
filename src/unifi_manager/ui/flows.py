@@ -129,7 +129,7 @@ def build_ip_scope(protocol: str) -> dict:
                 "preset": {"name": "TCP_UDP"},
             },
         }
-    # TCP and UDP use NAMED_PROTOCOL with uppercase name
+    # TCP, UDP, ICMP — uppercase named protocol
     return {
         "ipVersion": "IPV4",
         "protocolFilter": {
@@ -300,14 +300,14 @@ def flow_create_rules(client: UnifiClient) -> None:
 
     console.print(Rule("[dim]Step 2 — Protocol & ports[/dim]"))
     protocol = questionary.select(
-        "Protocol:", choices=["udp", "tcp", "tcp+udp", "any"]
+        "Protocol:", choices=["udp", "tcp", "tcp+udp", "icmp", "any"]
     ).ask()
 
     ports: list[int] = []
     port_list_id: str | None = None
     port_list_name: str | None = None
 
-    if protocol != "any":
+    if protocol not in ("any", "icmp"):
         port_source = questionary.select(
             "Port matching:",
             choices=["Enter ports manually", "Use a saved port list", "All ports (no port filter)"],
