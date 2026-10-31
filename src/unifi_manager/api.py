@@ -174,6 +174,16 @@ class UnifiClient:
     def get_policy(self, policy_id: str) -> dict:
         return self._get(self._site_path(f"/firewall/policies/{policy_id}"))
 
+    def patch_policy(self, policy_id: str, payload: dict) -> dict:
+        resp = self.session.patch(
+            f"{self.integration}{self._site_path(f'/firewall/policies/{policy_id}')}",
+            json=payload,
+            timeout=10,
+        )
+        if resp.status_code != 200:
+            raise UnifiAPIError(f"PATCH policy failed ({resp.status_code}): {resp.text}")
+        return resp.json()
+
     def get_traffic_matching_lists(self) -> list[dict]:
         return self._get_all(self._site_path("/traffic-matching-lists"))
 

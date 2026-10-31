@@ -676,6 +676,82 @@ def flow_extend_rules(client: UnifiClient) -> None:
     console.print(f"\n[bold]Done:[/bold] {', '.join(parts)}.")
 
 
+def flow_rename_rules(client: UnifiClient) -> None:
+    """Rename a group of managed policies by changing their name prefix."""
+    with _make_progress() as progress:
+        t_pol = progress.add_task("Fetching policies...", total=None)
+        all_policies = client.get_policies(progress, t_pol)
+
+    managed = [p for p in all_policies if TOOL_SIGNATURE in (p.get("description") or "")]
+
+    if not managed:
+        console.print(f"[yellow]No managed policies found (stamped with '{markup_escape(TOOL_SIGNATURE)}').[/yellow]")
+        return
+
+    groups: dict[str, list[dict]] = {}
+    for p in managed:
+        prefix = p["name"].split(" | ")[0].strip()
+        groups.setdefault(prefix, []).append(p)
+
+    t = Table(title=f"Managed Rule Groups ({len(groups)})", show_lines=True)
+    t.add_column("#", style="dim", width=4)
+    t.add_column("Current Prefix", style="cyan")
+    t.add_column("Policies", justify="right", style="green")
+    for i, (prefix, policies) in enumerate(groups.items(), 1):
+        t.add_row(str(i), prefix, str(len(policies)))
+    console.print(t)
+
+    selected_prefix = questionary.select(
+        "Select rule group to rename:",
+        choices=list(groups.keys()),
+    ).ask()
+    if not selected_prefix:
+        return
+
+    new_prefix = questionary.text(
+        f"New name prefix (current: '{selected_prefix}'):",
+        default=selected_prefix,
+    ).ask()
+    if not new_prefix or new_prefix == selected_prefix:
+        console.print("[dim]No change.[/dim]")
+        return
+
+    policies_to_rename = groups[selected_prefix]
+
+    # Preview
+    console.print()
+    console.print(Rule("[bold]Rename Preview[/bold]"))
+    pt = Table(show_lines=True, expand=False)
+    pt.add_column("#", style="dim", width=4)
+    pt.add_column("Current Name", style="yellow")
+    pt.add_column("New Name", style="green")
+    for n, p in enumerate(policies_to_rename, 1):
+        suffix = p["name"][len(selected_prefix):]
+        new_name = new_prefix + suffix
+        pt.add_row(str(n), p["name"], new_name)
+    console.print(pt)
+
+    if not questionary.confirm(
+        f"Rename {len(policies_to_rename)} policies?", default=False
+    ).ask():
+        console.print("[dim]Aborted.[/dim]")
+        return
+
+    renamed, failed = 0, 0
+    for p in policies_to_rename:
+        suffix = p["name"][len(selected_prefix):]
+        new_name = new_prefix + suffix
+        try:
+            client.patch_policy(p["id"], {"name": new_name})
+            console.print(f"  [green]OK[/green] {p['name']} -> {new_name}")
+            renamed += 1
+        except UnifiAPIError as e:
+            console.print(f"  [red]FAIL[/red] {p['name']}: {e}")
+            failed += 1
+
+    console.print(f"\n[bold]Done:[/bold] {renamed} renamed, {failed} failed.")
+
+
 def flow_cleanup_duplicates(client: UnifiClient) -> None:
     """Find unmanaged policies that are functionally identical to a managed one and offer to remove them."""
     with _make_progress() as progress:
