@@ -6,6 +6,7 @@ from pathlib import Path
 
 import questionary
 from rich.console import Console
+from rich.markup import escape as markup_escape
 from rich.panel import Panel
 from rich.rule import Rule
 from rich.table import Table
@@ -402,8 +403,7 @@ def flow_extend_rules(client: UnifiClient) -> None:
     ]
 
     if not tool_policies:
-        sig = TOOL_SIGNATURE.replace("[", "\\[")  # escape rich markup
-        console.print(f"[yellow]No policies stamped with '{sig}' found.[/yellow]")
+        console.print(f"[yellow]No policies stamped with '{markup_escape(TOOL_SIGNATURE)}' found.[/yellow]")
         if not user_policies:
             console.print("[yellow]No user-defined policies found at all.[/yellow]")
             return
@@ -535,13 +535,18 @@ def flow_list_policies(client: UnifiClient) -> None:
     t.add_column("Name", style="cyan")
     t.add_column("Action", style="bold")
     t.add_column("Enabled")
+    t.add_column("Managed", style="dim")
     t.add_column("Origin", style="dim")
     for i, p in enumerate(policies, 1):
         action = p.get("action", {}).get("type", "?")
         origin = p.get("metadata", {}).get("origin", "?")
         enabled = "[green]yes[/green]" if p.get("enabled") else "[red]no[/red]"
-        t.add_row(str(i), p.get("name", ""), action, enabled, origin)
+        managed = "[cyan]✓[/cyan]" if TOOL_SIGNATURE in (p.get("description") or "") else ""
+        t.add_row(str(i), p.get("name", ""), action, enabled, managed, origin)
     console.print(t)
+    tool_count = sum(1 for p in policies if TOOL_SIGNATURE in (p.get("description") or ""))
+    if tool_count:
+        console.print(f"[dim]{tool_count} policies managed by this tool (✓)[/dim]")
 
 
 def flow_manage_port_lists(client: UnifiClient) -> None:
