@@ -287,7 +287,32 @@ def preview_policies(
     console.print()
 
 
-def _policies_match(existing: dict, candidate: dict) -> bool:
+def _extract_port_str(p: dict) -> str:
+    """Extract a human-readable port string from any location in a policy."""
+    parts = []
+    for side in ("source", "destination"):
+        tf = p.get(side, {}).get("trafficFilter") or {}
+        pf = tf.get("portFilter") or {}
+        if pf.get("type") == "TRAFFIC_MATCHING_LIST":
+            parts.append(f"list:{pf.get('trafficMatchingListId','')[:8]}")
+        elif pf.get("items"):
+            parts.append(", ".join(
+                str(i.get("value", f"{i.get('start')}-{i.get('end')}"))
+                for i in pf["items"]
+            ))
+    return " / ".join(parts) if parts else "any"
+
+
+def _extract_ip_str(p: dict) -> str:
+    """Extract destination IP filter string from a policy."""
+    tf = p.get("destination", {}).get("trafficFilter") or {}
+    if tf.get("type") == "IP_ADDRESS":
+        items = tf.get("ipAddressFilter", {}).get("items", [])
+        return ", ".join(i.get("value", "") for i in items)
+    return ""
+
+
+
     return (
         existing.get("source", {}).get("zoneId") == candidate["source"]["zoneId"]
         and existing.get("destination", {}).get("zoneId") == candidate["destination"]["zoneId"]
@@ -783,7 +808,7 @@ def flow_adopt_rules(client: UnifiClient) -> None:
         return
 
     def _sig(p: dict) -> str:
-        """Functional signature: source zone + protocol + dest traffic filter type/ports."""
+        """Functional signature: source zone + protocol + ports + dest IP + action."""
         src = p.get("source", {}).get("zoneId", "")
         scope = p.get("ipProtocolScope", {})
         proto = (
@@ -791,18 +816,10 @@ def flow_adopt_rules(client: UnifiClient) -> None:
             or scope.get("protocolFilter", {}).get("preset", {}).get("name")
             or "any"
         )
-        dtf = p.get("destination", {}).get("trafficFilter") or {}
-        pf = dtf.get("portFilter", {})
-        ports = tuple(sorted(
-            i.get("value", f"{i.get('start')}-{i.get('end')}")
-            for i in pf.get("items", [])
-        ))
-        ip_items = tuple(sorted(
-            i.get("value", "") for i in
-            dtf.get("ipAddressFilter", {}).get("items", [])
-        ))
+        port_str = _extract_port_str(p)
+        ip_str = _extract_ip_str(p)
         action = p.get("action", {}).get("type", "")
-        return f"{src}|{proto}|{ports}|{ip_items}|{action}"
+        return f"{src}|{proto}|{port_str}|{ip_str}|{action}"
 
     # Group by signature
     groups: dict[str, list[dict]] = {}
@@ -840,17 +857,10 @@ def flow_adopt_rules(client: UnifiClient) -> None:
             or "any"
         ).upper()
         src_name = zone_id_map.get(p0.get("source", {}).get("zoneId", ""), "?")
-        dtf = p0.get("destination", {}).get("trafficFilter") or {}
-        pf = dtf.get("portFilter", {})
-        port_str = ", ".join(
-            str(i.get("value", f"{i.get('start')}-{i.get('end')}"))
-            for i in pf.get("items", [])
-        ) or "any"
-        ip_str = ", ".join(
-            i.get("value", "") for i in
-            dtf.get("ipAddressFilter", {}).get("items", [])
-        )
-        filter_str = " / ".join(x for x in [port_str, ip_str] if x)
+        filter_str = _extract_port_str(p0)
+        ip_str = _extract_ip_str(p0)
+        if ip_str:
+            filter_str = f"{filter_str} / {ip_str}" if filter_str != "any" else ip_str
         dest_zones_str = ", ".join(
             zone_id_map.get(p.get("destination", {}).get("zoneId", ""), "?") for p in pols
         )
@@ -867,12 +877,7 @@ def flow_adopt_rules(client: UnifiClient) -> None:
             or "any"
         ).upper()
         src = zone_id_map.get(p0.get("source", {}).get("zoneId", ""), "?")
-        dtf = p0.get("destination", {}).get("trafficFilter") or {}
-        pf = dtf.get("portFilter", {})
-        ports = ", ".join(
-            str(i.get("value", f"{i.get('start')}-{i.get('end')}"))
-            for i in pf.get("items", [])
-        ) or "any ports"
+        ports = _extract_port_str(p0)
         return f"{len(pols):>3}x  [{action}] {proto} {ports} from {src}"
 
     choices = [_choice_label(pols) for _, pols in candidates]
@@ -903,14 +908,8 @@ def flow_adopt_rules(client: UnifiClient) -> None:
         or scope.get("protocolFilter", {}).get("preset", {}).get("name")
         or "any"
     ).upper()
-    dtf = p0.get("destination", {}).get("trafficFilter") or {}
-    pf = dtf.get("portFilter", {})
-    port_str = ", ".join(
-        str(i.get("value", f"{i.get('start')}-{i.get('end')}"))
-        for i in pf.get("items", [])
-    )
-    ip_items = dtf.get("ipAddressFilter", {}).get("items", [])
-    ip_str = ", ".join(i.get("value", "") for i in ip_items)
+    port_str = _extract_port_str(p0)
+    ip_str = _extract_ip_str(p0)
 
     # Check if a managed rule group already exists with the same traffic signature
     managed_policies = [
@@ -927,14 +926,8 @@ def flow_adopt_rules(client: UnifiClient) -> None:
     # in case protocol scope differs between managed and unmanaged
     def _loose_sig(p: dict) -> str:
         src = p.get("source", {}).get("zoneId", "")
-        dtf = p.get("destination", {}).get("trafficFilter") or {}
-        pf = dtf.get("portFilter", {})
-        ports = tuple(sorted(
-            i.get("value", f"{i.get('start')}-{i.get('end')}")
-            for i in pf.get("items", [])
-        ))
         action = p.get("action", {}).get("type", "")
-        return f"{src}|{ports}|{action}"
+        return f"{src}|{_extract_port_str(p)}|{action}"
 
     selected_loose = _loose_sig(selected_policies[0])
     loose_managed_map: dict[str, list[dict]] = {}
