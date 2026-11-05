@@ -704,13 +704,16 @@ def flow_extend_rules(client: UnifiClient) -> None:
         )
         dest_traffic_filter = matching["destination"].get("trafficFilter")
 
-        # The controller rejects ANY protocol scope combined with a portFilter (500).
-        # Strip the portFilter from the cloned trafficFilter if protocol is ANY.
-        if template_is_any_proto and dest_traffic_filter and "portFilter" in dest_traffic_filter:
-            dest_traffic_filter = {k: v for k, v in dest_traffic_filter.items() if k != "portFilter"}
-            # If the filter only had a portFilter and nothing else meaningful, drop it entirely
-            if dest_traffic_filter.get("type") == "PORT":
+        # Strip trafficFilters that cannot be safely cloned to a different destination zone:
+        # - NETWORK type: networkIds are zone-specific, will 500 on a different dest zone
+        # - ANY protocol + portFilter: controller rejects this combination
+        if dest_traffic_filter:
+            if dest_traffic_filter.get("type") == "NETWORK":
                 dest_traffic_filter = None
+            elif template_is_any_proto and "portFilter" in dest_traffic_filter:
+                dest_traffic_filter = {k: v for k, v in dest_traffic_filter.items() if k != "portFilter"}
+                if dest_traffic_filter.get("type") == "PORT":
+                    dest_traffic_filter = None
 
         policy = build_policy(
             name=policy_name,
