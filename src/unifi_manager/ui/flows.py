@@ -1065,71 +1065,84 @@ def flow_normalise_group(client: UnifiClient) -> None:
         console.print("[yellow]No managed policies found.[/yellow]")
         return
 
-    # Group by prefix
+    # Group by prefix, build per-group protocol breakdown
     groups: dict[str, list[dict]] = {}
     for p in managed:
         prefix = p["name"].split(" | ")[0].strip()
         groups.setdefault(prefix, []).append(p)
 
-    # Find groups with mixed protocol scopes
-    mixed: list[tuple[str, list[dict], dict, list[dict]]] = []
-    for prefix, policies in groups.items():
-        scopes = {}
-        for p in policies:
-            scope = p.get("ipProtocolScope", {})
-            proto = (
-                scope.get("protocolFilter", {}).get("protocol", {}).get("name")
-                or scope.get("protocolFilter", {}).get("preset", {}).get("name")
-                or "ANY"
-            ).upper()
-            scopes.setdefault(proto, []).append(p)
-        if len(scopes) > 1:
-            # Majority protocol wins as the target
-            majority_proto = max(scopes, key=lambda k: len(scopes[k]))
-            majority_scope = scopes[majority_proto][0].get("ipProtocolScope")
-            minority = [p for proto, pols in scopes.items() if proto != majority_proto for p in pols]
-            mixed.append((prefix, minority, majority_scope, scopes[majority_proto]))
+    def _proto_of(p: dict) -> str:
+        scope = p.get("ipProtocolScope", {})
+        return (
+            scope.get("protocolFilter", {}).get("protocol", {}).get("name")
+            or scope.get("protocolFilter", {}).get("preset", {}).get("name")
+            or "ANY"
+        ).upper()
 
-    if not mixed:
+    mixed_groups = {
+        prefix: pols
+        for prefix, pols in groups.items()
+        if len({_proto_of(p) for p in pols}) > 1
+    }
+
+    if not mixed_groups:
         console.print("[green]All managed rule groups have consistent protocol scopes.[/green]")
         return
 
-    console.print(f"\n[bold]{len(mixed)} rule group(s) have inconsistent protocol scopes:[/bold]\n")
+    console.print(f"\n[bold]{len(mixed_groups)} rule group(s) have mixed protocol scopes.[/bold]\n")
 
-    for prefix, minority_policies, target_scope, majority_policies in mixed:
-        majority_proto = (
-            target_scope.get("protocolFilter", {}).get("protocol", {}).get("name")
-            or target_scope.get("protocolFilter", {}).get("preset", {}).get("name")
-            or "ANY"
-        ).upper()
-        minority_proto = (
-            minority_policies[0].get("ipProtocolScope", {}).get("protocolFilter", {}).get("protocol", {}).get("name")
-            or "ANY"
-        ).upper()
+    for prefix, policies in mixed_groups.items():
+        # Build breakdown: {proto: [policies]}
+        breakdown: dict[str, list[dict]] = {}
+        for p in policies:
+            breakdown.setdefault(_proto_of(p), []).append(p)
 
-        t = Table(title=f"{prefix}", show_lines=True)
-        t.add_column("Policy", style="yellow")
-        t.add_column("Current Protocol", style="red")
-        t.add_column("Target Protocol", style="green")
-        for p in minority_policies:
-            t.add_row(p["name"], minority_proto, majority_proto)
+        # Show breakdown table
+        t = Table(title=f"{prefix} — protocol breakdown", show_lines=True)
+        t.add_column("Protocol", style="cyan")
+        t.add_column("Count", justify="right", style="green")
+        t.add_column("Example policies", style="dim")
+        for proto, pols in sorted(breakdown.items(), key=lambda x: -len(x[1])):
+            examples = ", ".join(p["name"].split(" | ")[-1] for p in pols[:3])
+            if len(pols) > 3:
+                examples += f" (+{len(pols)-3} more)"
+            t.add_row(proto, str(len(pols)), examples)
         console.print(t)
-        console.print(
-            f"  [dim]{len(majority_policies)} policies already use {majority_proto}, "
-            f"{len(minority_policies)} need updating.[/dim]"
-        )
+
+        # Ask which protocol to normalise to
+        proto_choices = sorted(breakdown.keys(), key=lambda k: -len(breakdown[k]))
+        target_proto = questionary.select(
+            f"Normalise '{prefix}' to which protocol?",
+            choices=proto_choices + ["Skip this group"],
+        ).ask()
+
+        if target_proto == "Skip this group":
+            console.print("  [dim]Skipped.[/dim]\n")
+            continue
+
+        target_scope = breakdown[target_proto][0].get("ipProtocolScope")
+        to_fix = [p for p in policies if _proto_of(p) != target_proto]
+
+        # Preview
+        pt = Table(show_lines=True, expand=False)
+        pt.add_column("Policy", style="yellow")
+        pt.add_column("From", style="red")
+        pt.add_column("To", style="green")
+        for p in to_fix:
+            pt.add_row(p["name"], _proto_of(p), target_proto)
+        console.print(pt)
 
         if not questionary.confirm(
-            f"Normalise {len(minority_policies)} policies to {majority_proto}?", default=True
+            f"Update {len(to_fix)} policies to {target_proto}?", default=True
         ).ask():
-            console.print("  [dim]Skipped.[/dim]")
+            console.print("  [dim]Skipped.[/dim]\n")
             continue
 
         fixed, failed = 0, 0
-        for p in minority_policies:
+        for p in to_fix:
             try:
                 client.patch_policy(p["id"], {"ipProtocolScope": target_scope})
-                console.print(f"  [green]OK[/green] {p['name']}: {minority_proto} -> {majority_proto}")
+                console.print(f"  [green]OK[/green] {p['name']}: {_proto_of(p)} -> {target_proto}")
                 fixed += 1
                 time.sleep(0.3)
             except UnifiAPIError as e:
