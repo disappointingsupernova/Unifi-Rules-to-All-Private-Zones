@@ -876,7 +876,25 @@ def flow_adopt_rules(client: UnifiClient) -> None:
         managed_sig_map.setdefault(s, []).append(p)
 
     selected_sig = _sig(selected_policies[0])
-    matching_managed = managed_sig_map.get(selected_sig, [])
+    # Also try a looser match on just source zone + ports + action
+    # in case protocol scope differs between managed and unmanaged
+    def _loose_sig(p: dict) -> str:
+        src = p.get("source", {}).get("zoneId", "")
+        dtf = p.get("destination", {}).get("trafficFilter") or {}
+        pf = dtf.get("portFilter", {})
+        ports = tuple(sorted(
+            i.get("value", f"{i.get('start')}-{i.get('end')}")
+            for i in pf.get("items", [])
+        ))
+        action = p.get("action", {}).get("type", "")
+        return f"{src}|{ports}|{action}"
+
+    selected_loose = _loose_sig(selected_policies[0])
+    loose_managed_map: dict[str, list[dict]] = {}
+    for p in managed_policies:
+        loose_managed_map.setdefault(_loose_sig(p), []).append(p)
+
+    matching_managed = managed_sig_map.get(selected_sig) or loose_managed_map.get(selected_loose, [])
     existing_managed_prefix: str | None = None
     if matching_managed:
         existing_managed_prefix = matching_managed[0]["name"].split(" | ")[0].strip()
@@ -892,7 +910,6 @@ def flow_adopt_rules(client: UnifiClient) -> None:
             existing_managed_prefix = None
 
     if not existing_managed_prefix:
-        # Build suggestion from rule components
         action_word = p0.get("action", {}).get("type", "ALLOW").capitalize()
         parts = [action_word, proto]
         if port_str:
