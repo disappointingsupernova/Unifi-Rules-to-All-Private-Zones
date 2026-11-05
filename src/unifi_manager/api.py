@@ -95,10 +95,16 @@ class UnifiClient:
         raise UnifiAPIError(f"GET {path} failed after {retries} attempts: {last_err}")
 
     def _post(self, path: str, payload: dict) -> dict:
+        import json as _json
         resp = self.session.post(
             f"{self.integration}{path}", json=payload, timeout=30
         )
         if resp.status_code not in (200, 201):
+            if resp.status_code == 500:
+                raise UnifiAPIError(
+                    f"POST {path} failed ({resp.status_code}): {resp.text}\n"
+                    f"Payload: {_json.dumps(payload, indent=2)}"
+                )
             raise UnifiAPIError(f"POST {path} failed ({resp.status_code}): {resp.text}")
         return resp.json()
 
