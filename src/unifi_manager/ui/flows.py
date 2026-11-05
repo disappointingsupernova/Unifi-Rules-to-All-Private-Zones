@@ -314,7 +314,7 @@ def _extract_ip_str(p: dict) -> str:
     return ""
 
 
-
+def _policies_match(existing: dict, candidate: dict) -> bool:
     return (
         existing.get("source", {}).get("zoneId") == candidate["source"]["zoneId"]
         and existing.get("destination", {}).get("zoneId") == candidate["destination"]["zoneId"]
@@ -913,7 +913,8 @@ def flow_adopt_rules(client: UnifiClient) -> None:
     choice = questionary.select("Select group to adopt as managed:", choices=choices).ask()
     if not choice:
         return
-    _, selected_policies = candidates[choices.index(choice)]
+    selected_sig, selected_policies = candidates[choices.index(choice)]
+    is_dst_group = selected_sig.startswith("DST|")
 
     # Show all policies in the group
     console.print()
@@ -950,7 +951,8 @@ def flow_adopt_rules(client: UnifiClient) -> None:
         s = _sig(p)
         managed_sig_map.setdefault(s, []).append(p)
 
-    selected_sig = _sig(selected_policies[0])
+    # For managed group matching use the source-anchored sig of the first policy
+    first_src_sig = _sig(selected_policies[0])
     # Also try a looser match on just source zone + ports + action
     # in case protocol scope differs between managed and unmanaged
     def _loose_sig(p: dict) -> str:
@@ -963,8 +965,8 @@ def flow_adopt_rules(client: UnifiClient) -> None:
     for p in managed_policies:
         loose_managed_map.setdefault(_loose_sig(p), []).append(p)
 
-    matching_managed = managed_sig_map.get(selected_sig) or loose_managed_map.get(selected_loose, [])
-    loose_match_only = not managed_sig_map.get(selected_sig) and bool(loose_managed_map.get(selected_loose))
+    matching_managed = managed_sig_map.get(first_src_sig) or loose_managed_map.get(selected_loose, [])
+    loose_match_only = not managed_sig_map.get(first_src_sig) and bool(loose_managed_map.get(selected_loose))
     existing_managed_prefix: str | None = None
     if matching_managed:
         existing_managed_prefix = matching_managed[0]["name"].split(" | ")[0].strip()
@@ -1037,8 +1039,6 @@ def flow_adopt_rules(client: UnifiClient) -> None:
             return
     else:
         new_prefix = existing_managed_prefix
-
-    is_dst_group = selected_sig.startswith("DST|")
 
     # Preview renames
     console.print()

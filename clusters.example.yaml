@@ -24,6 +24,9 @@ excluded_zones:
   - VPN
   - Hotspot
   - DMZ
+  - FortiGate-LAN
+  - FortiGate-WAN
+  - Firewall OOB
 
 # Zone clusters — group zones by name for easy bulk rule creation.
 # Zone names must match exactly what appears in your UniFi controller.
