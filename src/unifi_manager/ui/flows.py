@@ -711,7 +711,6 @@ def flow_extend_rules(client: UnifiClient) -> None:
 
 def flow_adopt_rules(client: UnifiClient) -> None:
     """Find unmanaged policies that share the same traffic pattern and adopt them as managed."""
-    from collections import Counter
 
     with _make_progress() as progress:
         t_pol = progress.add_task("Fetching policies...", total=None)
@@ -821,20 +820,31 @@ def flow_adopt_rules(client: UnifiClient) -> None:
         pt.add_row(str(n), p.get("name", ""), dst_name)
     console.print(pt)
 
-    # Suggest a name prefix from the most common words across existing names
-    all_words = [
-        word for p in selected_policies
-        for word in p.get("name", "").split()
-    ]
-    word_counts = Counter(all_words)
-    # Build suggestion from words appearing in >50% of policies
-    threshold = len(selected_policies) * 0.5
-    suggested = " ".join(
-        w for w, c in word_counts.most_common()
-        if c >= threshold and w not in ("|", "->", "from", "to", "the", "a")
+    # Suggest a name prefix built from the rule's actual components
+    p0 = selected_policies[0]
+    scope = p0.get("ipProtocolScope", {})
+    proto = (
+        scope.get("protocolFilter", {}).get("protocol", {}).get("name")
+        or scope.get("protocolFilter", {}).get("preset", {}).get("name")
+        or "any"
+    ).upper()
+    dtf = p0.get("destination", {}).get("trafficFilter") or {}
+    pf = dtf.get("portFilter", {})
+    port_str = ", ".join(
+        str(i.get("value", f"{i.get('start')}-{i.get('end')}"))
+        for i in pf.get("items", [])
     )
-    if not suggested:
-        suggested = selected_policies[0].get("name", "").split(" | ")[0].strip()
+    ip_items = dtf.get("ipAddressFilter", {}).get("items", [])
+    ip_str = ", ".join(i.get("value", "") for i in ip_items)
+
+    # Build: Allow <PROTO> [port_str] [to ip_str] from <src_zone> to Destinations
+    parts = ["Allow", proto]
+    if port_str:
+        parts.append(port_str)
+    if ip_str:
+        parts += ["to", ip_str]
+    parts += ["from", src_zone_name, "to Destinations"]
+    suggested = " ".join(parts)
 
     console.print(f"\n[dim]Suggested prefix based on common words: '{suggested}'[/dim]")
     new_prefix = questionary.text(
