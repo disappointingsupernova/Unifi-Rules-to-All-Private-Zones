@@ -729,6 +729,7 @@ def flow_adopt_rules(client: UnifiClient) -> None:
         p for p in all_policies
         if TOOL_SIGNATURE not in (p.get("description") or "")
         and p.get("metadata", {}).get("origin") == "USER_DEFINED"
+        and p.get("action", {}).get("type") == "ALLOW"
     ]
 
     if not unmanaged:
@@ -754,7 +755,8 @@ def flow_adopt_rules(client: UnifiClient) -> None:
             i.get("value", "") for i in
             dtf.get("ipAddressFilter", {}).get("items", [])
         ))
-        return f"{src}|{proto}|{ports}|{ip_items}"
+        action = p.get("action", {}).get("type", "")
+        return f"{src}|{proto}|{ports}|{ip_items}|{action}"
 
     # Group by signature
     groups: dict[str, list[dict]] = {}
