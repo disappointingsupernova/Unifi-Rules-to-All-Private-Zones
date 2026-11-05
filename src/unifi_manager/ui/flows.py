@@ -950,12 +950,14 @@ def flow_adopt_rules(client: UnifiClient) -> None:
         parts += ["from", src_zone_name, "to Destinations"]
         suggested = " ".join(parts)
 
-    new_prefix = questionary.text(
-        "New managed rule name prefix:",
-        default=suggested,
-    ).ask()
-    if not new_prefix:
-        return
+        new_prefix = questionary.text(
+            "New managed rule name prefix:",
+            default=suggested,
+        ).ask()
+        if not new_prefix:
+            return
+    else:
+        new_prefix = existing_managed_prefix
 
     # Preview renames
     console.print()
