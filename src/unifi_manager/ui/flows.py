@@ -1,6 +1,7 @@
 """All interactive TUI flows for the UniFi Zone Firewall Rule Manager."""
 
 import getpass
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -504,6 +505,7 @@ def flow_create_rules(client: UnifiClient) -> None:
             except UnifiAPIError as e:
                 console.print(f"  [red]FAIL[/red] {policy_name}: {e}")
                 failed += 1
+            time.sleep(0.3)
 
     parts = [f"{created} created"]
     if replaced:
@@ -718,14 +720,21 @@ def flow_extend_rules(client: UnifiClient) -> None:
             skipped += 1
             continue
 
-        try:
-            result = client.create_policy(policy)
-            console.print(f"  [green]OK[/green] {policy_name}")
-            created += 1
-            existing_policies.append(result)
-        except UnifiAPIError as e:
-            console.print(f"  [red]FAIL[/red] {policy_name}: {e}")
-            failed += 1
+        for attempt in range(3):
+            try:
+                result = client.create_policy(policy)
+                console.print(f"  [green]OK[/green] {policy_name}")
+                created += 1
+                existing_policies.append(result)
+                break
+            except UnifiAPIError as e:
+                if "500" in str(e) and attempt < 2:
+                    time.sleep(1.5 * (attempt + 1))
+                else:
+                    console.print(f"  [red]FAIL[/red] {policy_name}: {e}")
+                    failed += 1
+                    break
+        time.sleep(0.3)  # brief pause between each POST
 
     parts = [f"{created} created"]
     if skipped:
