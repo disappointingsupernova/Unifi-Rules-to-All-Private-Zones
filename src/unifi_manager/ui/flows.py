@@ -620,6 +620,20 @@ def flow_extend_rules(client: UnifiClient) -> None:
     template = template_policies[0]
     ip_scope = template["ipProtocolScope"]
     description = template.get("description", TOOL_SIGNATURE)
+    template_is_any_proto = "protocolFilter" not in ip_scope
+
+    if template_is_any_proto:
+        # Check if any template policy has a portFilter in its dest trafficFilter
+        has_port_filter = any(
+            "portFilter" in (p.get("destination", {}).get("trafficFilter") or {})
+            for p in template_policies
+        )
+        if has_port_filter:
+            console.print(
+                "\n[yellow]Note: The template policies use ANY protocol scope with a port filter. "
+                "The controller does not allow this combination — port filters will be "
+                "stripped from the new policies.[/yellow]"
+            )
 
     fixed_zones = [z for z in zones if z["id"] in (existing_dest_ids if extend_sources else existing_source_ids)]
     if extend_sources:
@@ -670,6 +684,9 @@ def flow_extend_rules(client: UnifiClient) -> None:
         existing_policies = client.get_policies(progress, t_ex)
 
     created, skipped, failed = 0, 0, 0
+    # Detect if template uses ANY protocol scope (no protocolFilter)
+    template_is_any_proto = "protocolFilter" not in ip_scope
+
     for sz, dz in pairs:
         policy_name = f"{selected_group} | {sz['name']} -> {dz['name']}"
         matching = next(
@@ -677,6 +694,15 @@ def flow_extend_rules(client: UnifiClient) -> None:
             template,
         )
         dest_traffic_filter = matching["destination"].get("trafficFilter")
+
+        # The controller rejects ANY protocol scope combined with a portFilter (500).
+        # Strip the portFilter from the cloned trafficFilter if protocol is ANY.
+        if template_is_any_proto and dest_traffic_filter and "portFilter" in dest_traffic_filter:
+            dest_traffic_filter = {k: v for k, v in dest_traffic_filter.items() if k != "portFilter"}
+            # If the filter only had a portFilter and nothing else meaningful, drop it entirely
+            if dest_traffic_filter.get("type") == "PORT":
+                dest_traffic_filter = None
+
         policy = build_policy(
             name=policy_name,
             description=description,
