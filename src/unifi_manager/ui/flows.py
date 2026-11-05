@@ -287,14 +287,16 @@ def preview_policies(
     console.print()
 
 
-def _extract_port_str(p: dict) -> str:
+def _extract_port_str(p: dict, list_name_map: dict | None = None) -> str:
     """Extract a human-readable port string from any location in a policy."""
     parts = []
     for side in ("source", "destination"):
         tf = p.get(side, {}).get("trafficFilter") or {}
         pf = tf.get("portFilter") or {}
         if pf.get("type") == "TRAFFIC_MATCHING_LIST":
-            parts.append(f"list:{pf.get('trafficMatchingListId','')[:8]}")
+            list_id = pf.get("trafficMatchingListId", "")
+            name = (list_name_map or {}).get(list_id, f"list:{list_id[:8]}")
+            parts.append(name)
         elif pf.get("items"):
             parts.append(", ".join(
                 str(i.get("value", f"{i.get('start')}-{i.get('end')}"))
@@ -788,14 +790,17 @@ def flow_adopt_rules(client: UnifiClient) -> None:
         t_pol = progress.add_task("Fetching policies...", total=None)
         t_zones = progress.add_task("Fetching zones...", total=None)
         from concurrent.futures import ThreadPoolExecutor
-        with ThreadPoolExecutor(max_workers=2) as pool:
+        with ThreadPoolExecutor(max_workers=3) as pool:
             f_pol = pool.submit(client.get_policies, progress, t_pol)
             f_zones = pool.submit(client.get_zones)
+            f_lists = pool.submit(client.get_traffic_matching_lists)
             zones = f_zones.result()
             progress.update(t_zones, total=len(zones), completed=len(zones))
             all_policies = f_pol.result()
+            all_lists = f_lists.result()
 
     zone_id_map = {z["id"]: z["name"] for z in zones}
+    list_name_map = {l["id"]: l["name"] for l in all_lists}
 
     unmanaged = [
         p for p in all_policies
@@ -816,10 +821,8 @@ def flow_adopt_rules(client: UnifiClient) -> None:
             or scope.get("protocolFilter", {}).get("preset", {}).get("name")
             or "any"
         )
-        port_str = _extract_port_str(p)
-        ip_str = _extract_ip_str(p)
         action = p.get("action", {}).get("type", "")
-        return f"{src}|{proto}|{port_str}|{ip_str}|{action}"
+        return f"{src}|{proto}|{_extract_port_str(p, list_name_map)}|{_extract_ip_str(p)}|{action}"
 
     # Group by signature
     groups: dict[str, list[dict]] = {}
@@ -857,7 +860,7 @@ def flow_adopt_rules(client: UnifiClient) -> None:
             or "any"
         ).upper()
         src_name = zone_id_map.get(p0.get("source", {}).get("zoneId", ""), "?")
-        filter_str = _extract_port_str(p0)
+        filter_str = _extract_port_str(p0, list_name_map)
         ip_str = _extract_ip_str(p0)
         if ip_str:
             filter_str = f"{filter_str} / {ip_str}" if filter_str != "any" else ip_str
@@ -877,7 +880,7 @@ def flow_adopt_rules(client: UnifiClient) -> None:
             or "any"
         ).upper()
         src = zone_id_map.get(p0.get("source", {}).get("zoneId", ""), "?")
-        ports = _extract_port_str(p0)
+        ports = _extract_port_str(p0, list_name_map)
         return f"{len(pols):>3}x  [{action}] {proto} {ports} from {src}"
 
     choices = [_choice_label(pols) for _, pols in candidates]
@@ -908,7 +911,7 @@ def flow_adopt_rules(client: UnifiClient) -> None:
         or scope.get("protocolFilter", {}).get("preset", {}).get("name")
         or "any"
     ).upper()
-    port_str = _extract_port_str(p0)
+    port_str = _extract_port_str(p0, list_name_map)
     ip_str = _extract_ip_str(p0)
 
     # Check if a managed rule group already exists with the same traffic signature
@@ -927,7 +930,7 @@ def flow_adopt_rules(client: UnifiClient) -> None:
     def _loose_sig(p: dict) -> str:
         src = p.get("source", {}).get("zoneId", "")
         action = p.get("action", {}).get("type", "")
-        return f"{src}|{_extract_port_str(p)}|{action}"
+        return f"{src}|{_extract_port_str(p, list_name_map)}|{action}"
 
     selected_loose = _loose_sig(selected_policies[0])
     loose_managed_map: dict[str, list[dict]] = {}
