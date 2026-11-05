@@ -875,7 +875,6 @@ def flow_adopt_rules(client: UnifiClient) -> None:
         s = _sig(p)
         managed_sig_map.setdefault(s, []).append(p)
 
-    # Find managed groups that share the same signature as the selected unmanaged group
     selected_sig = _sig(selected_policies[0])
     matching_managed = managed_sig_map.get(selected_sig, [])
     existing_managed_prefix: str | None = None
@@ -885,18 +884,17 @@ def flow_adopt_rules(client: UnifiClient) -> None:
             f"\n[green]Managed rule group already exists with the same traffic pattern:[/green] "
             f"[cyan]'{existing_managed_prefix}'[/cyan] ({len(matching_managed)} policies)"
         )
-        use_existing = questionary.confirm(
+        if questionary.confirm(
             f"Adopt into existing group '{existing_managed_prefix}'?", default=True
-        ).ask()
-        if use_existing:
+        ).ask():
             suggested = existing_managed_prefix
         else:
             existing_managed_prefix = None
 
     if not existing_managed_prefix:
         # Build suggestion from rule components
-        action = p0.get("action", {}).get("type", "ALLOW").capitalize()
-        parts = [action, proto]
+        action_word = p0.get("action", {}).get("type", "ALLOW").capitalize()
+        parts = [action_word, proto]
         if port_str:
             parts.append(port_str)
         if ip_str:
@@ -904,7 +902,6 @@ def flow_adopt_rules(client: UnifiClient) -> None:
         parts += ["from", src_zone_name, "to Destinations"]
         suggested = " ".join(parts)
 
-    console.print(f"\n[dim]Suggested prefix based on common words: '{suggested}'[/dim]")
     new_prefix = questionary.text(
         "New managed rule name prefix:",
         default=suggested,
