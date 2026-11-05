@@ -1038,17 +1038,35 @@ def flow_adopt_rules(client: UnifiClient) -> None:
     else:
         new_prefix = existing_managed_prefix
 
+    is_dst_group = selected_sig.startswith("DST|")
+
     # Preview renames
     console.print()
     console.print(Rule("[bold]Adoption Preview[/bold]"))
     prev = Table(show_lines=True, expand=False)
     prev.add_column("#", style="dim", width=4)
     prev.add_column("Current Name", style="yellow")
+    prev.add_column("Source Zone", style="green")
+    prev.add_column("Dest Zone", style="blue")
+    prev.add_column("Protocol", style="magenta")
+    prev.add_column("Ports", style="yellow")
     prev.add_column("New Managed Name", style="green")
     for n, p in enumerate(selected_policies, 1):
-        dst_name = zone_id_map.get(p.get("destination", {}).get("zoneId", ""), "?")
-        new_name = f"{new_prefix} | {src_zone_name} -> {dst_name}"
-        prev.add_row(str(n), p.get("name", ""), new_name)
+        p_src = zone_id_map.get(p.get("source", {}).get("zoneId", ""), "?")
+        p_dst = zone_id_map.get(p.get("destination", {}).get("zoneId", ""), "?")
+        p_scope = p.get("ipProtocolScope", {})
+        p_proto = (
+            p_scope.get("protocolFilter", {}).get("protocol", {}).get("name")
+            or p_scope.get("protocolFilter", {}).get("preset", {}).get("name")
+            or "any"
+        ).upper()
+        p_ports = _extract_port_str(p, list_name_map)
+        # For dest-anchored groups, source varies per policy
+        if is_dst_group:
+            new_name = f"{new_prefix} | {p_src} -> {p_dst}"
+        else:
+            new_name = f"{new_prefix} | {src_zone_name} -> {p_dst}"
+        prev.add_row(str(n), p.get("name", ""), p_src, p_dst, p_proto, p_ports, new_name)
     console.print(prev)
 
     if not questionary.confirm(
@@ -1060,8 +1078,12 @@ def flow_adopt_rules(client: UnifiClient) -> None:
 
     adopted, failed = 0, 0
     for p in selected_policies:
-        dst_name = zone_id_map.get(p.get("destination", {}).get("zoneId", ""), "?")
-        new_name = f"{new_prefix} | {src_zone_name} -> {dst_name}"
+        p_src = zone_id_map.get(p.get("source", {}).get("zoneId", ""), "?")
+        p_dst = zone_id_map.get(p.get("destination", {}).get("zoneId", ""), "?")
+        if is_dst_group:
+            new_name = f"{new_prefix} | {p_src} -> {p_dst}"
+        else:
+            new_name = f"{new_prefix} | {src_zone_name} -> {p_dst}"
         existing_desc = (p.get("description") or "").replace(TOOL_SIGNATURE, "").strip()
         new_desc = f"{existing_desc} {TOOL_SIGNATURE}".strip()
         patch: dict = {"name": new_name, "description": new_desc}
