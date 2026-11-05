@@ -505,7 +505,7 @@ def flow_create_rules(client: UnifiClient) -> None:
             except UnifiAPIError as e:
                 console.print(f"  [red]FAIL[/red] {policy_name}: {e}")
                 failed += 1
-            time.sleep(0.3)
+            time.sleep(0.5)
 
     parts = [f"{created} created"]
     if replaced:
@@ -729,12 +729,14 @@ def flow_extend_rules(client: UnifiClient) -> None:
                 break
             except UnifiAPIError as e:
                 if "500" in str(e) and attempt < 2:
-                    time.sleep(1.5 * (attempt + 1))
+                    wait = 3.0 * (attempt + 1)
+                    console.print(f"  [yellow]⟳[/yellow] {policy_name} [dim](500, retrying in {wait:.0f}s...)[/dim]")
+                    time.sleep(wait)
                 else:
                     console.print(f"  [red]FAIL[/red] {policy_name}: {e}")
                     failed += 1
                     break
-        time.sleep(0.3)  # brief pause between each POST
+        time.sleep(0.5)  # pace requests to avoid overwhelming the UDM
 
     parts = [f"{created} created"]
     if skipped:
