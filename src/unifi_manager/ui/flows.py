@@ -865,15 +865,44 @@ def flow_adopt_rules(client: UnifiClient) -> None:
     ip_items = dtf.get("ipAddressFilter", {}).get("items", [])
     ip_str = ", ".join(i.get("value", "") for i in ip_items)
 
-    # Build: <Action> <PROTO> [port_str] [to ip_str] from <src_zone> to Destinations
-    action = p0.get("action", {}).get("type", "ALLOW").capitalize()
-    parts = [action, proto]
-    if port_str:
-        parts.append(port_str)
-    if ip_str:
-        parts += ["to", ip_str]
-    parts += ["from", src_zone_name, "to Destinations"]
-    suggested = " ".join(parts)
+    # Check if a managed rule group already exists with the same traffic signature
+    managed_policies = [
+        p for p in all_policies
+        if TOOL_SIGNATURE in (p.get("description") or "")
+    ]
+    managed_sig_map: dict[str, list[dict]] = {}
+    for p in managed_policies:
+        s = _sig(p)
+        managed_sig_map.setdefault(s, []).append(p)
+
+    # Find managed groups that share the same signature as the selected unmanaged group
+    selected_sig = _sig(selected_policies[0])
+    matching_managed = managed_sig_map.get(selected_sig, [])
+    existing_managed_prefix: str | None = None
+    if matching_managed:
+        existing_managed_prefix = matching_managed[0]["name"].split(" | ")[0].strip()
+        console.print(
+            f"\n[green]Managed rule group already exists with the same traffic pattern:[/green] "
+            f"[cyan]'{existing_managed_prefix}'[/cyan] ({len(matching_managed)} policies)"
+        )
+        use_existing = questionary.confirm(
+            f"Adopt into existing group '{existing_managed_prefix}'?", default=True
+        ).ask()
+        if use_existing:
+            suggested = existing_managed_prefix
+        else:
+            existing_managed_prefix = None
+
+    if not existing_managed_prefix:
+        # Build suggestion from rule components
+        action = p0.get("action", {}).get("type", "ALLOW").capitalize()
+        parts = [action, proto]
+        if port_str:
+            parts.append(port_str)
+        if ip_str:
+            parts += ["to", ip_str]
+        parts += ["from", src_zone_name, "to Destinations"]
+        suggested = " ".join(parts)
 
     console.print(f"\n[dim]Suggested prefix based on common words: '{suggested}'[/dim]")
     new_prefix = questionary.text(
