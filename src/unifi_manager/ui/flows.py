@@ -895,6 +895,7 @@ def flow_adopt_rules(client: UnifiClient) -> None:
         loose_managed_map.setdefault(_loose_sig(p), []).append(p)
 
     matching_managed = managed_sig_map.get(selected_sig) or loose_managed_map.get(selected_loose, [])
+    loose_match_only = not managed_sig_map.get(selected_sig) and bool(loose_managed_map.get(selected_loose))
     existing_managed_prefix: str | None = None
     if matching_managed:
         existing_managed_prefix = matching_managed[0]["name"].split(" | ")[0].strip()
@@ -902,12 +903,42 @@ def flow_adopt_rules(client: UnifiClient) -> None:
             f"\n[green]Managed rule group already exists with the same traffic pattern:[/green] "
             f"[cyan]'{existing_managed_prefix}'[/cyan] ({len(matching_managed)} policies)"
         )
-        if questionary.confirm(
-            f"Adopt into existing group '{existing_managed_prefix}'?", default=True
-        ).ask():
-            suggested = existing_managed_prefix
+        if loose_match_only:
+            # Show the protocol scope difference explicitly
+            unmanaged_proto = proto
+            managed_p0 = matching_managed[0]
+            managed_scope = managed_p0.get("ipProtocolScope", {})
+            managed_proto = (
+                managed_scope.get("protocolFilter", {}).get("protocol", {}).get("name")
+                or managed_scope.get("protocolFilter", {}).get("preset", {}).get("name")
+                or "any"
+            ).upper()
+            console.print(
+                f"\n[yellow bold]WARNING: Protocol scope mismatch[/yellow bold]\n"
+                f"  Unmanaged policies : [red]{unmanaged_proto}[/red]\n"
+                f"  Managed group      : [green]{managed_proto}[/green]\n"
+                f"\n  Adopting these policies will rename and stamp them with the managed "
+                f"group prefix, but will [bold]NOT[/bold] change their protocol scope on the controller.\n"
+                f"  They will appear under the same group name but may behave differently "
+                f"to the existing managed policies."
+            )
+            if not questionary.confirm(
+                "I understand the protocol scope differs — proceed anyway?", default=False
+            ).ask():
+                existing_managed_prefix = None
+            elif not questionary.confirm(
+                f"Adopt into existing group '{existing_managed_prefix}'?", default=True
+            ).ask():
+                existing_managed_prefix = None
+            else:
+                suggested = existing_managed_prefix
         else:
-            existing_managed_prefix = None
+            if not questionary.confirm(
+                f"Adopt into existing group '{existing_managed_prefix}'?", default=True
+            ).ask():
+                existing_managed_prefix = None
+            else:
+                suggested = existing_managed_prefix
 
     if not existing_managed_prefix:
         action_word = p0.get("action", {}).get("type", "ALLOW").capitalize()
