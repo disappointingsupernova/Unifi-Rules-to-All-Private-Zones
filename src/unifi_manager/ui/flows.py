@@ -847,6 +847,9 @@ def flow_adopt_rules(client: UnifiClient) -> None:
 
     # Suggest a name prefix built from the rule's actual components
     p0 = selected_policies[0]
+    src_zone_name = zone_id_map.get(
+        p0.get("source", {}).get("zoneId", ""), "?"
+    )
     scope = p0.get("ipProtocolScope", {})
     proto = (
         scope.get("protocolFilter", {}).get("protocol", {}).get("name")
@@ -887,9 +890,6 @@ def flow_adopt_rules(client: UnifiClient) -> None:
     prev.add_column("#", style="dim", width=4)
     prev.add_column("Current Name", style="yellow")
     prev.add_column("New Managed Name", style="green")
-    src_zone_name = zone_id_map.get(
-        selected_policies[0].get("source", {}).get("zoneId", ""), "?"
-    )
     for n, p in enumerate(selected_policies, 1):
         dst_name = zone_id_map.get(p.get("destination", {}).get("zoneId", ""), "?")
         new_name = f"{new_prefix} | {src_zone_name} -> {dst_name}"
