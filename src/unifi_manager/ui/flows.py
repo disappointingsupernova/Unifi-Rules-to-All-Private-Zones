@@ -685,6 +685,9 @@ def flow_extend_rules(client: UnifiClient) -> None:
         t_ex = progress.add_task("Checking for existing policies...", total=None)
         existing_policies = client.get_policies(progress, t_ex)
 
+    # Brief pause to let the UDM settle after the large fetch before POSTing
+    time.sleep(2.0)
+
     created, skipped, failed = 0, 0, 0
     # Detect if template uses ANY protocol scope (no protocolFilter)
     template_is_any_proto = "protocolFilter" not in ip_scope
