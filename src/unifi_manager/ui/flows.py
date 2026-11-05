@@ -709,6 +709,181 @@ def flow_extend_rules(client: UnifiClient) -> None:
     console.print(f"\n[bold]Done:[/bold] {', '.join(parts)}.")
 
 
+def flow_adopt_rules(client: UnifiClient) -> None:
+    """Find unmanaged policies that share the same traffic pattern and adopt them as managed."""
+    from collections import Counter
+
+    with _make_progress() as progress:
+        t_pol = progress.add_task("Fetching policies...", total=None)
+        t_zones = progress.add_task("Fetching zones...", total=None)
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            f_pol = pool.submit(client.get_policies, progress, t_pol)
+            f_zones = pool.submit(client.get_zones)
+            zones = f_zones.result()
+            progress.update(t_zones, total=len(zones), completed=len(zones))
+            all_policies = f_pol.result()
+
+    zone_id_map = {z["id"]: z["name"] for z in zones}
+
+    unmanaged = [
+        p for p in all_policies
+        if TOOL_SIGNATURE not in (p.get("description") or "")
+        and p.get("metadata", {}).get("origin") == "USER_DEFINED"
+    ]
+
+    if not unmanaged:
+        console.print("[yellow]No unmanaged user-defined policies found.[/yellow]")
+        return
+
+    def _sig(p: dict) -> str:
+        """Functional signature: source zone + protocol + dest traffic filter type/ports."""
+        src = p.get("source", {}).get("zoneId", "")
+        scope = p.get("ipProtocolScope", {})
+        proto = (
+            scope.get("protocolFilter", {}).get("protocol", {}).get("name")
+            or scope.get("protocolFilter", {}).get("preset", {}).get("name")
+            or "any"
+        )
+        dtf = p.get("destination", {}).get("trafficFilter") or {}
+        pf = dtf.get("portFilter", {})
+        ports = tuple(sorted(
+            i.get("value", f"{i.get('start')}-{i.get('end')}")
+            for i in pf.get("items", [])
+        ))
+        ip_items = tuple(sorted(
+            i.get("value", "") for i in
+            dtf.get("ipAddressFilter", {}).get("items", [])
+        ))
+        return f"{src}|{proto}|{ports}|{ip_items}"
+
+    # Group by signature
+    groups: dict[str, list[dict]] = {}
+    for p in unmanaged:
+        groups.setdefault(_sig(p), []).append(p)
+
+    # Only show groups with 2+ policies, sorted by count desc
+    candidates = sorted(
+        [(sig, pols) for sig, pols in groups.items() if len(pols) >= 2],
+        key=lambda x: len(x[1]),
+        reverse=True,
+    )
+
+    if not candidates:
+        console.print("[yellow]No unmanaged policy groups with 2 or more matching policies found.[/yellow]")
+        return
+
+    # Display summary table
+    t = Table(title=f"Unmanaged Policy Groups ({len(candidates)})", show_lines=True)
+    t.add_column("#", style="dim", width=4)
+    t.add_column("Count", justify="right", style="bold green", width=6)
+    t.add_column("Source Zone", style="green")
+    t.add_column("Protocol", style="magenta")
+    t.add_column("Ports / IP Filter", style="yellow")
+    t.add_column("Sample Name", style="cyan")
+    for i, (sig, pols) in enumerate(candidates, 1):
+        p0 = pols[0]
+        scope = p0.get("ipProtocolScope", {})
+        proto = (
+            scope.get("protocolFilter", {}).get("protocol", {}).get("name")
+            or scope.get("protocolFilter", {}).get("preset", {}).get("name")
+            or "any"
+        ).upper()
+        src_name = zone_id_map.get(p0.get("source", {}).get("zoneId", ""), "?")
+        dtf = p0.get("destination", {}).get("trafficFilter") or {}
+        pf = dtf.get("portFilter", {})
+        port_str = ", ".join(
+            str(i.get("value", f"{i.get('start')}-{i.get('end')}"))
+            for i in pf.get("items", [])
+        ) or ""
+        ip_str = ", ".join(
+            i.get("value", "") for i in
+            dtf.get("ipAddressFilter", {}).get("items", [])
+        )
+        filter_str = " / ".join(x for x in [port_str, ip_str] if x) or "any"
+        t.add_row(str(i), str(len(pols)), src_name, proto, filter_str, p0.get("name", "")[:50])
+    console.print(t)
+
+    choices = [f"{len(pols):>3}x  {pols[0].get('name', '')[:60]}" for _, pols in candidates]
+    choice = questionary.select("Select group to adopt as managed:", choices=choices).ask()
+    if not choice:
+        return
+    _, selected_policies = candidates[choices.index(choice)]
+
+    # Show all policies in the group
+    console.print()
+    pt = Table(title=f"Policies in group ({len(selected_policies)})", show_lines=True)
+    pt.add_column("#", style="dim", width=4)
+    pt.add_column("Current Name", style="yellow")
+    pt.add_column("Destination Zone", style="blue")
+    for n, p in enumerate(selected_policies, 1):
+        dst_name = zone_id_map.get(p.get("destination", {}).get("zoneId", ""), "?")
+        pt.add_row(str(n), p.get("name", ""), dst_name)
+    console.print(pt)
+
+    # Suggest a name prefix from the most common words across existing names
+    all_words = [
+        word for p in selected_policies
+        for word in p.get("name", "").split()
+    ]
+    word_counts = Counter(all_words)
+    # Build suggestion from words appearing in >50% of policies
+    threshold = len(selected_policies) * 0.5
+    suggested = " ".join(
+        w for w, c in word_counts.most_common()
+        if c >= threshold and w not in ("|", "->", "from", "to", "the", "a")
+    )
+    if not suggested:
+        suggested = selected_policies[0].get("name", "").split(" | ")[0].strip()
+
+    console.print(f"\n[dim]Suggested prefix based on common words: '{suggested}'[/dim]")
+    new_prefix = questionary.text(
+        "New managed rule name prefix:",
+        default=suggested,
+    ).ask()
+    if not new_prefix:
+        return
+
+    # Preview renames
+    console.print()
+    console.print(Rule("[bold]Adoption Preview[/bold]"))
+    prev = Table(show_lines=True, expand=False)
+    prev.add_column("#", style="dim", width=4)
+    prev.add_column("Current Name", style="yellow")
+    prev.add_column("New Managed Name", style="green")
+    src_zone_name = zone_id_map.get(
+        selected_policies[0].get("source", {}).get("zoneId", ""), "?"
+    )
+    for n, p in enumerate(selected_policies, 1):
+        dst_name = zone_id_map.get(p.get("destination", {}).get("zoneId", ""), "?")
+        new_name = f"{new_prefix} | {src_zone_name} -> {dst_name}"
+        prev.add_row(str(n), p.get("name", ""), new_name)
+    console.print(prev)
+
+    if not questionary.confirm(
+        f"Adopt {len(selected_policies)} policies as managed (rename + stamp description)?",
+        default=False,
+    ).ask():
+        console.print("[dim]Aborted.[/dim]")
+        return
+
+    adopted, failed = 0, 0
+    for p in selected_policies:
+        dst_name = zone_id_map.get(p.get("destination", {}).get("zoneId", ""), "?")
+        new_name = f"{new_prefix} | {src_zone_name} -> {dst_name}"
+        existing_desc = (p.get("description") or "").replace(TOOL_SIGNATURE, "").strip()
+        new_desc = f"{existing_desc} {TOOL_SIGNATURE}".strip()
+        try:
+            client.patch_policy(p["id"], {"name": new_name, "description": new_desc})
+            console.print(f"  [green]OK[/green] {p['name']} -> {new_name}")
+            adopted += 1
+        except UnifiAPIError as e:
+            console.print(f"  [red]FAIL[/red] {p['name']}: {e}")
+            failed += 1
+
+    console.print(f"\n[bold]Done:[/bold] {adopted} adopted, {failed} failed.")
+
+
 def flow_rename_rules(client: UnifiClient) -> None:
     """Rename a group of managed policies by changing their name prefix."""
     with _make_progress() as progress:
