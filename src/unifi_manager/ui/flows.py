@@ -824,14 +824,34 @@ def flow_adopt_rules(client: UnifiClient) -> None:
         action = p.get("action", {}).get("type", "")
         return f"{src}|{proto}|{_extract_port_str(p, list_name_map)}|{_extract_ip_str(p)}|{action}"
 
-    # Group by signature
-    groups: dict[str, list[dict]] = {}
+    # Group by signature — two modes:
+    # 1. Same source zone + protocol + ports (current): finds rules to extend to more destinations
+    # 2. Same destination zone + protocol + ports: finds rules to extend to more sources
+    # Build both and merge, preferring larger groups
+    groups_by_src: dict[str, list[dict]] = {}
+    groups_by_dst: dict[str, list[dict]] = {}
     for p in unmanaged:
-        groups.setdefault(_sig(p), []).append(p)
+        groups_by_src.setdefault(_sig(p), []).append(p)
+        # Dest-anchored sig: dest zone + protocol + ports + action
+        dst = p.get("destination", {}).get("zoneId", "")
+        scope = p.get("ipProtocolScope", {})
+        proto = (
+            scope.get("protocolFilter", {}).get("protocol", {}).get("name")
+            or scope.get("protocolFilter", {}).get("preset", {}).get("name")
+            or "any"
+        )
+        action = p.get("action", {}).get("type", "")
+        dst_sig = f"DST|{dst}|{proto}|{_extract_port_str(p, list_name_map)}|{action}"
+        groups_by_dst.setdefault(dst_sig, []).append(p)
 
-    # Only show groups with 2+ policies, sorted by count desc
+    # Merge: use whichever grouping gives the larger group for each policy set
+    all_groups = {**groups_by_src}
+    for sig, pols in groups_by_dst.items():
+        if len(pols) > len(all_groups.get(sig, [])):
+            all_groups[sig] = pols
+
     candidates = sorted(
-        [(sig, pols) for sig, pols in groups.items() if len(pols) >= 2],
+        [(sig, pols) for sig, pols in all_groups.items() if len(pols) >= 2],
         key=lambda x: len(x[1]),
         reverse=True,
     )
@@ -846,9 +866,10 @@ def flow_adopt_rules(client: UnifiClient) -> None:
     t.add_column("Count", justify="right", style="bold green", width=6)
     t.add_column("Action", style="bold", width=8)
     t.add_column("Source Zone", style="green")
+    t.add_column("Dest Zone", style="blue")
     t.add_column("Protocol", style="magenta")
     t.add_column("Ports / IP Filter", style="yellow")
-    t.add_column("Destination Zones", style="blue")
+    t.add_column("Zones", style="dim")
     for i, (sig, pols) in enumerate(candidates, 1):
         p0 = pols[0]
         action = p0.get("action", {}).get("type", "?")
@@ -859,18 +880,20 @@ def flow_adopt_rules(client: UnifiClient) -> None:
             or scope.get("protocolFilter", {}).get("preset", {}).get("name")
             or "any"
         ).upper()
-        src_name = zone_id_map.get(p0.get("source", {}).get("zoneId", ""), "?")
+        is_dst_group = sig.startswith("DST|")
+        src_names = set(zone_id_map.get(p.get("source", {}).get("zoneId", ""), "?") for p in pols)
+        dst_names = set(zone_id_map.get(p.get("destination", {}).get("zoneId", ""), "?") for p in pols)
+        src_col = "(multiple)" if len(src_names) > 1 else next(iter(src_names))
+        dst_col = "(multiple)" if len(dst_names) > 1 else next(iter(dst_names))
         filter_str = _extract_port_str(p0, list_name_map)
         ip_str = _extract_ip_str(p0)
         if ip_str:
             filter_str = f"{filter_str} / {ip_str}" if filter_str != "any" else ip_str
-        dest_zones_str = ", ".join(
-            zone_id_map.get(p.get("destination", {}).get("zoneId", ""), "?") for p in pols
-        )
-        t.add_row(str(i), str(len(pols)), action_str, src_name, proto, filter_str, dest_zones_str[:60])
+        zones_str = ", ".join(sorted(dst_names if not is_dst_group else src_names))[:50]
+        t.add_row(str(i), str(len(pols)), action_str, src_col, dst_col, proto, filter_str, zones_str)
     console.print(t)
 
-    def _choice_label(pols: list[dict]) -> str:
+    def _choice_label(sig: str, pols: list[dict]) -> str:
         p0 = pols[0]
         action = p0.get("action", {}).get("type", "?")
         scope = p0.get("ipProtocolScope", {})
@@ -879,11 +902,14 @@ def flow_adopt_rules(client: UnifiClient) -> None:
             or scope.get("protocolFilter", {}).get("preset", {}).get("name")
             or "any"
         ).upper()
-        src = zone_id_map.get(p0.get("source", {}).get("zoneId", ""), "?")
         ports = _extract_port_str(p0, list_name_map)
+        if sig.startswith("DST|"):
+            dst = zone_id_map.get(p0.get("destination", {}).get("zoneId", ""), "?")
+            return f"{len(pols):>3}x  [{action}] {proto} {ports} to {dst}"
+        src = zone_id_map.get(p0.get("source", {}).get("zoneId", ""), "?")
         return f"{len(pols):>3}x  [{action}] {proto} {ports} from {src}"
 
-    choices = [_choice_label(pols) for _, pols in candidates]
+    choices = [_choice_label(sig, pols) for sig, pols in candidates]
     choice = questionary.select("Select group to adopt as managed:", choices=choices).ask()
     if not choice:
         return
