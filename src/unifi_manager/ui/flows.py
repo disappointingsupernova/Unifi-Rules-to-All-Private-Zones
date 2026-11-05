@@ -729,7 +729,6 @@ def flow_adopt_rules(client: UnifiClient) -> None:
         p for p in all_policies
         if TOOL_SIGNATURE not in (p.get("description") or "")
         and p.get("metadata", {}).get("origin") == "USER_DEFINED"
-        and p.get("action", {}).get("type") == "ALLOW"
     ]
 
     if not unmanaged:
@@ -778,12 +777,15 @@ def flow_adopt_rules(client: UnifiClient) -> None:
     t = Table(title=f"Unmanaged Policy Groups ({len(candidates)})", show_lines=True)
     t.add_column("#", style="dim", width=4)
     t.add_column("Count", justify="right", style="bold green", width=6)
+    t.add_column("Action", style="bold", width=8)
     t.add_column("Source Zone", style="green")
     t.add_column("Protocol", style="magenta")
     t.add_column("Ports / IP Filter", style="yellow")
     t.add_column("Destination Zones", style="blue")
     for i, (sig, pols) in enumerate(candidates, 1):
         p0 = pols[0]
+        action = p0.get("action", {}).get("type", "?")
+        action_str = f"[green]{action}[/green]" if action == "ALLOW" else f"[red]{action}[/red]"
         scope = p0.get("ipProtocolScope", {})
         proto = (
             scope.get("protocolFilter", {}).get("protocol", {}).get("name")
@@ -805,11 +807,12 @@ def flow_adopt_rules(client: UnifiClient) -> None:
         dest_zones_str = ", ".join(
             zone_id_map.get(p.get("destination", {}).get("zoneId", ""), "?") for p in pols
         )
-        t.add_row(str(i), str(len(pols)), src_name, proto, filter_str, dest_zones_str[:60])
+        t.add_row(str(i), str(len(pols)), action_str, src_name, proto, filter_str, dest_zones_str[:60])
     console.print(t)
 
     def _choice_label(pols: list[dict]) -> str:
         p0 = pols[0]
+        action = p0.get("action", {}).get("type", "?")
         scope = p0.get("ipProtocolScope", {})
         proto = (
             scope.get("protocolFilter", {}).get("protocol", {}).get("name")
@@ -823,7 +826,7 @@ def flow_adopt_rules(client: UnifiClient) -> None:
             str(i.get("value", f"{i.get('start')}-{i.get('end')}"))
             for i in pf.get("items", [])
         ) or "any ports"
-        return f"{len(pols):>3}x  {proto} {ports} from {src}"
+        return f"{len(pols):>3}x  [{action}] {proto} {ports} from {src}"
 
     choices = [_choice_label(pols) for _, pols in candidates]
     choice = questionary.select("Select group to adopt as managed:", choices=choices).ask()
@@ -859,8 +862,9 @@ def flow_adopt_rules(client: UnifiClient) -> None:
     ip_items = dtf.get("ipAddressFilter", {}).get("items", [])
     ip_str = ", ".join(i.get("value", "") for i in ip_items)
 
-    # Build: Allow <PROTO> [port_str] [to ip_str] from <src_zone> to Destinations
-    parts = ["Allow", proto]
+    # Build: <Action> <PROTO> [port_str] [to ip_str] from <src_zone> to Destinations
+    action = p0.get("action", {}).get("type", "ALLOW").capitalize()
+    parts = [action, proto]
     if port_str:
         parts.append(port_str)
     if ip_str:
