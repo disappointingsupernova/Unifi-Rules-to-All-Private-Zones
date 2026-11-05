@@ -976,6 +976,16 @@ def flow_adopt_rules(client: UnifiClient) -> None:
                 existing_managed_prefix = None
             else:
                 suggested = existing_managed_prefix
+                # Offer to normalise protocol scope to match the managed group
+                normalise_proto = questionary.confirm(
+                    f"Also normalise protocol scope from {unmanaged_proto} to {managed_proto} "
+                    f"on the controller? (recommended)", default=True
+                ).ask()
+                if normalise_proto:
+                    # Build the target ip_scope from the managed group's template
+                    managed_ip_scope = matching_managed[0].get("ipProtocolScope")
+                else:
+                    managed_ip_scope = None
         else:
             if not questionary.confirm(
                 f"Adopt into existing group '{existing_managed_prefix}'?", default=True
@@ -1029,8 +1039,12 @@ def flow_adopt_rules(client: UnifiClient) -> None:
         new_name = f"{new_prefix} | {src_zone_name} -> {dst_name}"
         existing_desc = (p.get("description") or "").replace(TOOL_SIGNATURE, "").strip()
         new_desc = f"{existing_desc} {TOOL_SIGNATURE}".strip()
+        patch: dict = {"name": new_name, "description": new_desc}
+        # If normalising protocol scope, include the target ipProtocolScope
+        if locals().get("managed_ip_scope"):
+            patch["ipProtocolScope"] = managed_ip_scope
         try:
-            client.patch_policy(p["id"], {"name": new_name, "description": new_desc})
+            client.patch_policy(p["id"], patch)
             console.print(f"  [green]OK[/green] {p['name']} -> {new_name}")
             adopted += 1
         except UnifiAPIError as e:
@@ -1038,6 +1052,90 @@ def flow_adopt_rules(client: UnifiClient) -> None:
             failed += 1
 
     console.print(f"\n[bold]Done:[/bold] {adopted} adopted, {failed} failed.")
+
+
+def flow_normalise_group(client: UnifiClient) -> None:
+    """Find managed rule groups with inconsistent protocol scopes and fix them."""
+    with _make_progress() as progress:
+        t_pol = progress.add_task("Fetching policies...", total=None)
+        all_policies = client.get_policies(progress, t_pol)
+
+    managed = [p for p in all_policies if TOOL_SIGNATURE in (p.get("description") or "")]
+    if not managed:
+        console.print("[yellow]No managed policies found.[/yellow]")
+        return
+
+    # Group by prefix
+    groups: dict[str, list[dict]] = {}
+    for p in managed:
+        prefix = p["name"].split(" | ")[0].strip()
+        groups.setdefault(prefix, []).append(p)
+
+    # Find groups with mixed protocol scopes
+    mixed: list[tuple[str, list[dict], dict, list[dict]]] = []
+    for prefix, policies in groups.items():
+        scopes = {}
+        for p in policies:
+            scope = p.get("ipProtocolScope", {})
+            proto = (
+                scope.get("protocolFilter", {}).get("protocol", {}).get("name")
+                or scope.get("protocolFilter", {}).get("preset", {}).get("name")
+                or "ANY"
+            ).upper()
+            scopes.setdefault(proto, []).append(p)
+        if len(scopes) > 1:
+            # Majority protocol wins as the target
+            majority_proto = max(scopes, key=lambda k: len(scopes[k]))
+            majority_scope = scopes[majority_proto][0].get("ipProtocolScope")
+            minority = [p for proto, pols in scopes.items() if proto != majority_proto for p in pols]
+            mixed.append((prefix, minority, majority_scope, scopes[majority_proto]))
+
+    if not mixed:
+        console.print("[green]All managed rule groups have consistent protocol scopes.[/green]")
+        return
+
+    console.print(f"\n[bold]{len(mixed)} rule group(s) have inconsistent protocol scopes:[/bold]\n")
+
+    for prefix, minority_policies, target_scope, majority_policies in mixed:
+        majority_proto = (
+            target_scope.get("protocolFilter", {}).get("protocol", {}).get("name")
+            or target_scope.get("protocolFilter", {}).get("preset", {}).get("name")
+            or "ANY"
+        ).upper()
+        minority_proto = (
+            minority_policies[0].get("ipProtocolScope", {}).get("protocolFilter", {}).get("protocol", {}).get("name")
+            or "ANY"
+        ).upper()
+
+        t = Table(title=f"{prefix}", show_lines=True)
+        t.add_column("Policy", style="yellow")
+        t.add_column("Current Protocol", style="red")
+        t.add_column("Target Protocol", style="green")
+        for p in minority_policies:
+            t.add_row(p["name"], minority_proto, majority_proto)
+        console.print(t)
+        console.print(
+            f"  [dim]{len(majority_policies)} policies already use {majority_proto}, "
+            f"{len(minority_policies)} need updating.[/dim]"
+        )
+
+        if not questionary.confirm(
+            f"Normalise {len(minority_policies)} policies to {majority_proto}?", default=True
+        ).ask():
+            console.print("  [dim]Skipped.[/dim]")
+            continue
+
+        fixed, failed = 0, 0
+        for p in minority_policies:
+            try:
+                client.patch_policy(p["id"], {"ipProtocolScope": target_scope})
+                console.print(f"  [green]OK[/green] {p['name']}: {minority_proto} -> {majority_proto}")
+                fixed += 1
+                time.sleep(0.3)
+            except UnifiAPIError as e:
+                console.print(f"  [red]FAIL[/red] {p['name']}: {e}")
+                failed += 1
+        console.print(f"  {fixed} fixed, {failed} failed.\n")
 
 
 def flow_rename_rules(client: UnifiClient) -> None:

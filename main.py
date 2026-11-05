@@ -41,6 +41,7 @@ from src.unifi_manager.ui.flows import (
     flow_list_policies,
     flow_manage_clusters,
     flow_manage_port_lists,
+    flow_normalise_group,
     flow_rename_rules,
 )
 
@@ -169,6 +170,7 @@ def main() -> None:
                     "Extend existing rules to more zones",
                     "Rename managed rule group",
                     "Adopt unmanaged rules as managed",
+                    "Normalise rule group protocol scopes",
                     "List existing policies",
                     "Clean up duplicate unmanaged policies",
                     "Manage port lists",
@@ -187,6 +189,8 @@ def main() -> None:
                 flow_rename_rules(_client)
             elif action == "Adopt unmanaged rules as managed":
                 flow_adopt_rules(_client)
+            elif action == "Normalise rule group protocol scopes":
+                flow_normalise_group(_client)
             elif action == "List existing policies":
                 flow_list_policies(_client)
             elif action == "Clean up duplicate unmanaged policies":
