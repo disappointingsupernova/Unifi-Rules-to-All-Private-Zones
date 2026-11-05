@@ -779,7 +779,7 @@ def flow_adopt_rules(client: UnifiClient) -> None:
     t.add_column("Source Zone", style="green")
     t.add_column("Protocol", style="magenta")
     t.add_column("Ports / IP Filter", style="yellow")
-    t.add_column("Sample Name", style="cyan")
+    t.add_column("Destination Zones", style="blue")
     for i, (sig, pols) in enumerate(candidates, 1):
         p0 = pols[0]
         scope = p0.get("ipProtocolScope", {})
@@ -794,16 +794,36 @@ def flow_adopt_rules(client: UnifiClient) -> None:
         port_str = ", ".join(
             str(i.get("value", f"{i.get('start')}-{i.get('end')}"))
             for i in pf.get("items", [])
-        ) or ""
+        ) or "any"
         ip_str = ", ".join(
             i.get("value", "") for i in
             dtf.get("ipAddressFilter", {}).get("items", [])
         )
-        filter_str = " / ".join(x for x in [port_str, ip_str] if x) or "any"
-        t.add_row(str(i), str(len(pols)), src_name, proto, filter_str, p0.get("name", "")[:50])
+        filter_str = " / ".join(x for x in [port_str, ip_str] if x)
+        dest_zones_str = ", ".join(
+            zone_id_map.get(p.get("destination", {}).get("zoneId", ""), "?") for p in pols
+        )
+        t.add_row(str(i), str(len(pols)), src_name, proto, filter_str, dest_zones_str[:60])
     console.print(t)
 
-    choices = [f"{len(pols):>3}x  {pols[0].get('name', '')[:60]}" for _, pols in candidates]
+    def _choice_label(pols: list[dict]) -> str:
+        p0 = pols[0]
+        scope = p0.get("ipProtocolScope", {})
+        proto = (
+            scope.get("protocolFilter", {}).get("protocol", {}).get("name")
+            or scope.get("protocolFilter", {}).get("preset", {}).get("name")
+            or "any"
+        ).upper()
+        src = zone_id_map.get(p0.get("source", {}).get("zoneId", ""), "?")
+        dtf = p0.get("destination", {}).get("trafficFilter") or {}
+        pf = dtf.get("portFilter", {})
+        ports = ", ".join(
+            str(i.get("value", f"{i.get('start')}-{i.get('end')}"))
+            for i in pf.get("items", [])
+        ) or "any ports"
+        return f"{len(pols):>3}x  {proto} {ports} from {src}"
+
+    choices = [_choice_label(pols) for _, pols in candidates]
     choice = questionary.select("Select group to adopt as managed:", choices=choices).ask()
     if not choice:
         return
