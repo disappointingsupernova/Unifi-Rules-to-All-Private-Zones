@@ -96,7 +96,7 @@ class UnifiClient:
 
     def _post(self, path: str, payload: dict) -> dict:
         resp = self.session.post(
-            f"{self.integration}{path}", json=payload, timeout=10
+            f"{self.integration}{path}", json=payload, timeout=30
         )
         if resp.status_code not in (200, 201):
             raise UnifiAPIError(f"POST {path} failed ({resp.status_code}): {resp.text}")
@@ -164,7 +164,7 @@ class UnifiClient:
     def delete_policy(self, policy_id: str) -> None:
         resp = self.session.delete(
             f"{self.integration}{self._site_path(f'/firewall/policies/{policy_id}')}",
-            timeout=10,
+            timeout=30,
         )
         if resp.status_code != 200:
             raise UnifiAPIError(
@@ -192,7 +192,7 @@ class UnifiClient:
         resp = self.session.put(
             f"{self.integration}{self._site_path(f'/firewall/policies/{policy_id}')}",
             json=put_payload,
-            timeout=10,
+            timeout=30,
         )
         if resp.status_code != 200:
             raise UnifiAPIError(f"PUT policy failed ({resp.status_code}): {resp.text}")
@@ -210,7 +210,7 @@ class UnifiClient:
     def delete_traffic_matching_list(self, list_id: str) -> None:
         resp = self.session.delete(
             f"{self.integration}{self._site_path(f'/traffic-matching-lists/{list_id}')}",
-            timeout=10,
+            timeout=30,
         )
         if resp.status_code != 200:
             raise UnifiAPIError(
