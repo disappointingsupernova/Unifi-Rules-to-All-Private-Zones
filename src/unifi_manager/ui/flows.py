@@ -619,7 +619,11 @@ def flow_extend_rules(client: UnifiClient) -> None:
         console.print("[yellow]No zones selected.[/yellow]")
         return
 
-    template = template_policies[0]
+    # Prefer a template with an explicit protocolFilter over ANY scope
+    template = next(
+        (p for p in template_policies if "protocolFilter" in p.get("ipProtocolScope", {})),
+        template_policies[0],
+    )
     ip_scope = template["ipProtocolScope"]
     description = template.get("description", TOOL_SIGNATURE)
     template_is_any_proto = "protocolFilter" not in ip_scope
