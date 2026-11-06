@@ -951,23 +951,38 @@ def flow_adopt_rules(client: UnifiClient) -> None:
         s = _sig(p)
         managed_sig_map.setdefault(s, []).append(p)
 
-    # For managed group matching use the source-anchored sig of the first policy
-    first_src_sig = _sig(selected_policies[0])
-    # Also try a looser match on just source zone + ports + action
-    # in case protocol scope differs between managed and unmanaged
-    def _loose_sig(p: dict) -> str:
+    # Loose sigs: ignore protocol scope, match on zone anchor + ports + action
+    def _loose_src_sig(p: dict) -> str:
         src = p.get("source", {}).get("zoneId", "")
         action = p.get("action", {}).get("type", "")
-        return f"{src}|{_extract_port_str(p, list_name_map)}|{action}"
+        return f"SRC|{src}|{_extract_port_str(p, list_name_map)}|{action}"
 
-    selected_loose = _loose_sig(selected_policies[0])
-    loose_managed_map: dict[str, list[dict]] = {}
+    def _loose_dst_sig(p: dict) -> str:
+        dst = p.get("destination", {}).get("zoneId", "")
+        action = p.get("action", {}).get("type", "")
+        return f"DST|{dst}|{_extract_port_str(p, list_name_map)}|{action}"
+
+    loose_src_map: dict[str, list[dict]] = {}
+    loose_dst_map: dict[str, list[dict]] = {}
     for p in managed_policies:
-        loose_managed_map.setdefault(_loose_sig(p), []).append(p)
+        loose_src_map.setdefault(_loose_src_sig(p), []).append(p)
+        loose_dst_map.setdefault(_loose_dst_sig(p), []).append(p)
 
-    matching_managed = managed_sig_map.get(first_src_sig) or loose_managed_map.get(selected_loose, [])
-    loose_match_only = not managed_sig_map.get(first_src_sig) and bool(loose_managed_map.get(selected_loose))
+    first_src_sig = _sig(selected_policies[0])
+    # For DST-anchored groups every policy shares the same destination zone
+    first_dst_sig = _loose_dst_sig(selected_policies[0])
+    first_src_loose = _loose_src_sig(selected_policies[0])
+
+    matching_managed = (
+        managed_sig_map.get(first_src_sig)
+        or loose_src_map.get(first_src_loose)
+        or loose_dst_map.get(first_dst_sig)
+        or []
+    )
+    loose_match_only = not managed_sig_map.get(first_src_sig) and bool(matching_managed)
+
     existing_managed_prefix: str | None = None
+    managed_ip_scope = None
     if matching_managed:
         existing_managed_prefix = matching_managed[0]["name"].split(" | ")[0].strip()
         console.print(
@@ -975,7 +990,6 @@ def flow_adopt_rules(client: UnifiClient) -> None:
             f"[cyan]'{existing_managed_prefix}'[/cyan] ({len(matching_managed)} policies)"
         )
         if loose_match_only:
-            # Show the protocol scope difference explicitly
             unmanaged_proto = proto
             managed_p0 = matching_managed[0]
             managed_scope = managed_p0.get("ipProtocolScope", {})
@@ -1002,24 +1016,16 @@ def flow_adopt_rules(client: UnifiClient) -> None:
             ).ask():
                 existing_managed_prefix = None
             else:
-                suggested = existing_managed_prefix
-                # Offer to normalise protocol scope to match the managed group
-                normalise_proto = questionary.confirm(
+                if questionary.confirm(
                     f"Also normalise protocol scope from {unmanaged_proto} to {managed_proto} "
                     f"on the controller? (recommended)", default=True
-                ).ask()
-                if normalise_proto:
-                    # Build the target ip_scope from the managed group's template
+                ).ask():
                     managed_ip_scope = matching_managed[0].get("ipProtocolScope")
-                else:
-                    managed_ip_scope = None
         else:
             if not questionary.confirm(
                 f"Adopt into existing group '{existing_managed_prefix}'?", default=True
             ).ask():
                 existing_managed_prefix = None
-            else:
-                suggested = existing_managed_prefix
 
     if not existing_managed_prefix:
         action_word = p0.get("action", {}).get("type", "ALLOW").capitalize()
@@ -1087,8 +1093,7 @@ def flow_adopt_rules(client: UnifiClient) -> None:
         existing_desc = (p.get("description") or "").replace(TOOL_SIGNATURE, "").strip()
         new_desc = f"{existing_desc} {TOOL_SIGNATURE}".strip()
         patch: dict = {"name": new_name, "description": new_desc}
-        # If normalising protocol scope, include the target ipProtocolScope
-        if locals().get("managed_ip_scope"):
+        if managed_ip_scope:
             patch["ipProtocolScope"] = managed_ip_scope
         try:
             client.patch_policy(p["id"], patch)
