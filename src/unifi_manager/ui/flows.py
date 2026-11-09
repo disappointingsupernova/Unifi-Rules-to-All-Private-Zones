@@ -314,6 +314,15 @@ def _extract_ip_str(p: dict) -> str:
     return ""
 
 
+def _extract_src_ip_str(p: dict) -> str:
+    """Extract source IP filter string from a policy."""
+    tf = p.get("source", {}).get("trafficFilter") or {}
+    if tf.get("type") == "IP_ADDRESS":
+        items = tf.get("ipAddressFilter", {}).get("items", [])
+        return ", ".join(i.get("value", "") for i in items)
+    return ""
+
+
 def _policies_match(existing: dict, candidate: dict) -> bool:
     return (
         existing.get("source", {}).get("zoneId") == candidate["source"]["zoneId"]
@@ -550,12 +559,17 @@ def flow_extend_rules(client: UnifiClient) -> None:
     with _make_progress() as progress:
         t_policies = progress.add_task("Fetching policies...", total=None)
         t_zones = progress.add_task("Fetching zones...", total=None)
-        with ThreadPoolExecutor(max_workers=2) as pool:
+        t_lists = progress.add_task("Fetching port lists...", total=None)
+        with ThreadPoolExecutor(max_workers=3) as pool:
             f_policies = pool.submit(client.get_policies, progress, t_policies)
             f_zones = pool.submit(client.get_zones)
+            f_lists = pool.submit(client.get_traffic_matching_lists)
             zones = f_zones.result()
             progress.update(t_zones, total=len(zones), completed=len(zones))
             all_policies = f_policies.result()
+            all_lists = f_lists.result()
+            progress.update(t_lists, total=len(all_lists), completed=len(all_lists))
+    list_name_map = {l["id"]: l["name"] for l in all_lists}
     console.print(f"[dim]Loaded {len(all_policies)} policies, {len(zones)} zones.[/dim]")
 
     zone_id_map = {z["id"]: z["name"] for z in zones}
@@ -684,27 +698,38 @@ def flow_extend_rules(client: UnifiClient) -> None:
     pt.add_column("#", style="dim", width=4)
     pt.add_column("Policy Name", style="cyan")
     pt.add_column("Source Zone", style="green")
+    pt.add_column("Src IP", style="yellow")
     pt.add_column("Destination Zone", style="blue")
+    pt.add_column("Dest IP", style="yellow")
     pt.add_column("Protocol", style="magenta")
-    pt.add_column("Dest Filter", style="yellow")
+    pt.add_column("Ports", style="yellow")
     for n, (sz, dz) in enumerate(pairs, 1):
-        # Summarise protocol from ip_scope
         proto = ip_scope.get("protocolFilter", {}).get("protocol", {}).get("name") \
             or ip_scope.get("protocolFilter", {}).get("preset", {}).get("name") \
             or "any"
-        # Summarise dest traffic filter
+        # Find the template policy for this src zone to get its source IP
+        src_template = next(
+            (p for p in template_policies if p["source"]["zoneId"] == sz["id"]),
+            template,
+        )
+        src_ip = _extract_src_ip_str(src_template)
         dtf = matching_for(dz)
         pf = dtf.get("portFilter", {}) if dtf else {}
-        port_str = ", ".join(
-            str(i.get("value", f"{i.get('start')}-{i.get('end')}"))
-            for i in pf.get("items", [])
-        ) if pf.get("items") else ""
-        ip_str = ""
+        if pf.get("type") == "TRAFFIC_MATCHING_LIST":
+            list_id = pf.get("trafficMatchingListId", "")
+            port_str = list_name_map.get(list_id, f"list:{list_id[:8]}")
+        elif pf.get("items"):
+            port_str = ", ".join(
+                str(i.get("value", f"{i.get('start')}-{i.get('end')}"))
+                for i in pf["items"]
+            )
+        else:
+            port_str = "any"
+        dest_ip = ""
         if dtf and dtf.get("type") == "IP_ADDRESS":
             items = dtf.get("ipAddressFilter", {}).get("items", [])
-            ip_str = ", ".join(i.get("value", "") for i in items)
-        dest_filter = " / ".join(x for x in [ip_str, port_str] if x) or "any"
-        pt.add_row(str(n), f"{selected_group} | {sz['name']} -> {dz['name']}", sz["name"], dz["name"], proto.upper(), dest_filter)
+            dest_ip = ", ".join(i.get("value", "") for i in items)
+        pt.add_row(str(n), f"{selected_group} | {sz['name']} -> {dz['name']}", sz["name"], src_ip or "any", dz["name"], dest_ip or "any", proto.upper(), port_str)
     console.print(pt)
 
     if not questionary.confirm(f"Create {len(pairs)} new policies?", default=False).ask():
@@ -1070,7 +1095,9 @@ def flow_adopt_rules(client: UnifiClient) -> None:
     prev.add_column("#", style="dim", width=4)
     prev.add_column("Current Name", style="yellow")
     prev.add_column("Source Zone", style="green")
+    prev.add_column("Src IP", style="yellow")
     prev.add_column("Dest Zone", style="blue")
+    prev.add_column("Dest IP", style="yellow")
     prev.add_column("Protocol", style="magenta")
     prev.add_column("Ports", style="yellow")
     prev.add_column("New Managed Name", style="green")
@@ -1084,12 +1111,13 @@ def flow_adopt_rules(client: UnifiClient) -> None:
             or "any"
         ).upper()
         p_ports = _extract_port_str(p, list_name_map)
-        # For dest-anchored groups, source varies per policy
+        p_src_ip = _extract_src_ip_str(p)
+        p_dst_ip = _extract_ip_str(p)
         if is_dst_group:
             new_name = f"{new_prefix} | {p_src} -> {p_dst}"
         else:
             new_name = f"{new_prefix} | {src_zone_name} -> {p_dst}"
-        prev.add_row(str(n), p.get("name", ""), p_src, p_dst, p_proto, p_ports, new_name)
+        prev.add_row(str(n), p.get("name", ""), p_src, p_src_ip or "any", p_dst, p_dst_ip or "any", p_proto, p_ports, new_name)
     console.print(prev)
 
     if not questionary.confirm(
