@@ -638,6 +638,8 @@ def flow_extend_rules(client: UnifiClient) -> None:
             "Destination zones (same sources, new destinations)",
         ],
     ).ask()
+    if not direction:
+        return
     extend_sources = direction.startswith("Source")
 
     if extend_sources:
@@ -1542,6 +1544,106 @@ def flow_decrypt_backup() -> None:
     out = path.replace(".enc", "")
     Path(out).write_bytes(data)
     console.print(f"[green]Decrypted to:[/green] {out}")
+
+
+def flow_find_duplicate_policies(client: UnifiClient) -> None:
+    """Find policies that are functionally identical (same zones, protocol, filters, action)."""
+    with _make_progress() as progress:
+        t_pol = progress.add_task("Fetching policies...", total=None)
+        t_zones = progress.add_task("Fetching zones...", total=None)
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=3) as pool:
+            f_pol = pool.submit(client.get_policies, progress, t_pol)
+            f_zones = pool.submit(client.get_zones)
+            f_lists = pool.submit(client.get_traffic_matching_lists)
+            zones, all_policies, all_lists = f_zones.result(), f_pol.result(), f_lists.result()
+            progress.update(t_zones, total=len(zones), completed=len(zones))
+
+    zone_id_map = {z["id"]: z["name"] for z in zones}
+    list_name_map = {l["id"]: l["name"] for l in all_lists}
+
+    def _dup_sig(p: dict) -> str:
+        src = p.get("source", {}).get("zoneId", "")
+        dst = p.get("destination", {}).get("zoneId", "")
+        scope = p.get("ipProtocolScope", {})
+        proto = (
+            scope.get("protocolFilter", {}).get("protocol", {}).get("name")
+            or scope.get("protocolFilter", {}).get("preset", {}).get("name")
+            or "any"
+        )
+        action = p.get("action", {}).get("type", "")
+        ports = _extract_port_str(p, list_name_map)
+        dst_ip = _extract_ip_str(p)
+        src_ip = _extract_src_ip_str(p)
+        return f"{src}|{dst}|{proto}|{ports}|{dst_ip}|{src_ip}|{action}"
+
+    seen: dict[str, list[dict]] = {}
+    for p in all_policies:
+        seen.setdefault(_dup_sig(p), []).append(p)
+
+    dup_groups = {sig: pols for sig, pols in seen.items() if len(pols) > 1}
+
+    if not dup_groups:
+        console.print("[green]No duplicate policies found.[/green]")
+        return
+
+    total_dups = sum(len(v) - 1 for v in dup_groups.values())
+    console.print(f"\n[bold yellow]{len(dup_groups)} duplicate group(s) found — {total_dups} redundant policies.[/bold yellow]\n")
+
+    deleted = 0
+    for sig, pols in dup_groups.items():
+        t = Table(show_lines=True, expand=False)
+        t.add_column("#", style="dim", width=4)
+        t.add_column("Name", style="cyan")
+        t.add_column("Source Zone", style="green")
+        t.add_column("Dest Zone", style="blue")
+        t.add_column("Protocol", style="magenta")
+        t.add_column("Ports", style="yellow")
+        t.add_column("Src IP", style="yellow")
+        t.add_column("Dest IP", style="yellow")
+        t.add_column("Managed", style="dim")
+        for n, p in enumerate(pols, 1):
+            scope = p.get("ipProtocolScope", {})
+            proto = (
+                scope.get("protocolFilter", {}).get("protocol", {}).get("name")
+                or scope.get("protocolFilter", {}).get("preset", {}).get("name")
+                or "any"
+            ).upper()
+            managed = "[cyan]managed[/cyan]" if TOOL_SIGNATURE in (p.get("description") or "") else "[dim]unmanaged[/dim]"
+            t.add_row(
+                str(n),
+                p.get("name", ""),
+                zone_id_map.get(p.get("source", {}).get("zoneId", ""), "?"),
+                zone_id_map.get(p.get("destination", {}).get("zoneId", ""), "?"),
+                proto,
+                _extract_port_str(p, list_name_map),
+                _extract_src_ip_str(p) or "any",
+                _extract_ip_str(p) or "any",
+                managed,
+            )
+        console.print(t)
+
+        # Default keep: managed first, then first in list
+        keep = next((p for p in pols if TOOL_SIGNATURE in (p.get("description") or "")), pols[0])
+        to_delete = [p for p in pols if p["id"] != keep["id"]]
+
+        console.print(f"  Keeping: [cyan]{keep['name']}[/cyan]")
+        if not questionary.confirm(
+            f"Delete {len(to_delete)} duplicate(s)?", default=False
+        ).ask():
+            console.print("  [dim]Skipped.[/dim]\n")
+            continue
+
+        for p in to_delete:
+            try:
+                client.delete_policy(p["id"])
+                console.print(f"  [green]Deleted[/green] {p['name']}")
+                deleted += 1
+            except UnifiAPIError as e:
+                console.print(f"  [red]FAIL[/red] {p['name']}: {e}")
+        console.print()
+
+    console.print(f"[bold]Done:[/bold] {deleted} duplicate policies deleted.")
 
 
 def flow_manage_clusters(zones: list[dict]) -> None:

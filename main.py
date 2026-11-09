@@ -38,6 +38,7 @@ from src.unifi_manager.ui.flows import (
     flow_create_rules,
     flow_decrypt_backup,
     flow_extend_rules,
+    flow_find_duplicate_policies,
     flow_list_policies,
     flow_manage_clusters,
     flow_manage_port_lists,
@@ -172,6 +173,7 @@ def main() -> None:
                     "Adopt unmanaged rules as managed",
                     "Normalise rule group protocol scopes",
                     "List existing policies",
+                    "Find duplicate policies",
                     "Clean up duplicate unmanaged policies",
                     "Manage port lists",
                     "Backup site config",
@@ -193,6 +195,8 @@ def main() -> None:
                 flow_normalise_group(_client)
             elif action == "List existing policies":
                 flow_list_policies(_client)
+            elif action == "Find duplicate policies":
+                flow_find_duplicate_policies(_client)
             elif action == "Clean up duplicate unmanaged policies":
                 flow_cleanup_duplicates(_client)
             elif action == "Manage port lists":
