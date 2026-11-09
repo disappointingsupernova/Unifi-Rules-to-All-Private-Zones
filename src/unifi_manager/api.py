@@ -108,7 +108,7 @@ class UnifiClient:
             raise UnifiAPIError(f"POST {path} failed ({resp.status_code}): {resp.text}")
         return resp.json()
 
-    def _get_all(self, path: str, page_size: int = 200, progress=None, task_id=None) -> list[dict]:
+    def _get_all(self, path: str, page_size: int = 500, progress=None, task_id=None) -> list[dict]:
         """Fetch all pages from a paginated endpoint, parallelising after the first page."""
         first = self._get(path, params={"limit": page_size, "offset": 0})
         results: list[dict] = list(first.get("data", []))
@@ -123,9 +123,8 @@ class UnifiClient:
             return results
 
         offsets = list(range(page_size, total, page_size))
-        # Limit concurrency to 3 — UDM Pro struggles with more simultaneous connections
         from concurrent.futures import ThreadPoolExecutor, as_completed
-        with ThreadPoolExecutor(max_workers=3) as pool:
+        with ThreadPoolExecutor(max_workers=min(len(offsets), 8)) as pool:
             futures = {
                 pool.submit(self._get, path, params={"limit": page_size, "offset": o}): o
                 for o in offsets
