@@ -851,13 +851,13 @@ def flow_adopt_rules(client: UnifiClient) -> None:
             all_groups[sig] = pols
 
     candidates = sorted(
-        [(sig, pols) for sig, pols in all_groups.items() if len(pols) >= 2],
+        list(all_groups.items()),
         key=lambda x: len(x[1]),
         reverse=True,
     )
 
     if not candidates:
-        console.print("[yellow]No unmanaged policy groups with 2 or more matching policies found.[/yellow]")
+        console.print("[yellow]No unmanaged user-defined policies found.[/yellow]")
         return
 
     # Display summary table
