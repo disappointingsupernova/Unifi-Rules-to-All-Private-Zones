@@ -1627,12 +1627,68 @@ def flow_find_duplicate_policies(client: UnifiClient) -> None:
         keep = next((p for p in pols if TOOL_SIGNATURE in (p.get("description") or "")), pols[0])
         to_delete = [p for p in pols if p["id"] != keep["id"]]
 
-        console.print(f"  Keeping: [cyan]{keep['name']}[/cyan]")
-        if not questionary.confirm(
-            f"Delete {len(to_delete)} duplicate(s)?", default=False
-        ).ask():
-            console.print("  [dim]Skipped.[/dim]\n")
-            continue
+        managed_pols = [p for p in pols if TOOL_SIGNATURE in (p.get("description") or "")]
+        unmanaged_pols = [p for p in pols if TOOL_SIGNATURE not in (p.get("description") or "")]
+        all_unmanaged = len(managed_pols) == 0
+
+        if all_unmanaged:
+            action = questionary.select(
+                "Action:",
+                choices=[
+                    "Adopt one and delete the rest",
+                    "Delete all but the first",
+                    "Skip",
+                ],
+            ).ask()
+            if not action or action == "Skip":
+                console.print("  [dim]Skipped.[/dim]\n")
+                continue
+            if action == "Adopt one and delete the rest":
+                names = [p["name"] for p in pols]
+                chosen_name = questionary.select("Which policy to keep and adopt?", choices=names).ask()
+                if not chosen_name:
+                    console.print("  [dim]Skipped.[/dim]\n")
+                    continue
+                keep = next(p for p in pols if p["name"] == chosen_name)
+                new_prefix = questionary.text(
+                    "Managed rule name prefix:", default=keep["name"]
+                ).ask()
+                if not new_prefix:
+                    console.print("  [dim]Skipped.[/dim]\n")
+                    continue
+                src_zone = zone_id_map.get(keep.get("source", {}).get("zoneId", ""), "?")
+                dst_zone = zone_id_map.get(keep.get("destination", {}).get("zoneId", ""), "?")
+                new_name = f"{new_prefix} | {src_zone} -> {dst_zone}"
+                existing_desc = (keep.get("description") or "").strip()
+                new_desc = f"{existing_desc} {TOOL_SIGNATURE}".strip()
+                try:
+                    client.patch_policy(keep["id"], {"name": new_name, "description": new_desc})
+                    console.print(f"  [green]Adopted[/green] {keep['name']} -> {new_name}")
+                except UnifiAPIError as e:
+                    console.print(f"  [red]FAIL adopting {keep['name']}: {e}[/red]")
+                    console.print("  [dim]Skipped deleting duplicates.[/dim]\n")
+                    continue
+            else:
+                keep = pols[0]
+            to_delete = [p for p in pols if p["id"] != keep["id"]]
+        else:
+            # At least one managed — keep the managed one, delete unmanaged duplicates
+            keep = managed_pols[0]
+            to_delete = unmanaged_pols
+            console.print(f"  Keeping managed: [cyan]{keep['name']}[/cyan]")
+            if not questionary.confirm(
+                f"Delete {len(to_delete)} unmanaged duplicate(s)?", default=False
+            ).ask():
+                console.print("  [dim]Skipped.[/dim]\n")
+                continue
+
+        if all_unmanaged and action != "Skip":
+            console.print(f"  Keeping: [cyan]{keep['name']}[/cyan]")
+            if not questionary.confirm(
+                f"Delete {len(to_delete)} duplicate(s)?", default=False
+            ).ask():
+                console.print("  [dim]Skipped.[/dim]\n")
+                continue
 
         for p in to_delete:
             try:
