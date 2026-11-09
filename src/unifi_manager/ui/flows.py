@@ -564,10 +564,9 @@ def flow_extend_rules(client: UnifiClient) -> None:
             f_policies = pool.submit(client.get_policies, progress, t_policies)
             f_zones = pool.submit(client.get_zones)
             f_lists = pool.submit(client.get_traffic_matching_lists)
-            zones = f_zones.result()
+            # Wait for all three concurrently — don't block on one before starting the next
+            zones, all_lists, all_policies = f_zones.result(), f_lists.result(), f_policies.result()
             progress.update(t_zones, total=len(zones), completed=len(zones))
-            all_policies = f_policies.result()
-            all_lists = f_lists.result()
             progress.update(t_lists, total=len(all_lists), completed=len(all_lists))
     list_name_map = {l["id"]: l["name"] for l in all_lists}
     console.print(f"[dim]Loaded {len(all_policies)} policies, {len(zones)} zones.[/dim]")
@@ -819,10 +818,8 @@ def flow_adopt_rules(client: UnifiClient) -> None:
             f_pol = pool.submit(client.get_policies, progress, t_pol)
             f_zones = pool.submit(client.get_zones)
             f_lists = pool.submit(client.get_traffic_matching_lists)
-            zones = f_zones.result()
+            zones, all_policies, all_lists = f_zones.result(), f_pol.result(), f_lists.result()
             progress.update(t_zones, total=len(zones), completed=len(zones))
-            all_policies = f_pol.result()
-            all_lists = f_lists.result()
 
     zone_id_map = {z["id"]: z["name"] for z in zones}
     list_name_map = {l["id"]: l["name"] for l in all_lists}
