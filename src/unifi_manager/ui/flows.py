@@ -903,10 +903,27 @@ def flow_adopt_rules(client: UnifiClient) -> None:
             or "any"
         ).upper()
         ports = _extract_port_str(p0, list_name_map)
-        if sig.startswith("DST|"):
-            dst = zone_id_map.get(p0.get("destination", {}).get("zoneId", ""), "?")
-            return f"{len(pols):>3}x  [{action}] {proto} {ports} to {dst}"
         src = zone_id_map.get(p0.get("source", {}).get("zoneId", ""), "?")
+        dst = zone_id_map.get(p0.get("destination", {}).get("zoneId", ""), "?")
+
+        if len(pols) == 1:
+            # Extract source IP
+            src_tf = p0.get("source", {}).get("trafficFilter") or {}
+            src_ip_items = src_tf.get("ipAddressFilter", {}).get("items", [])
+            src_ip = ", ".join(i.get("value", "") for i in src_ip_items)
+            # Extract dest IP
+            dst_tf = p0.get("destination", {}).get("trafficFilter") or {}
+            dst_ip_items = dst_tf.get("ipAddressFilter", {}).get("items", [])
+            dst_ip = ", ".join(i.get("value", "") for i in dst_ip_items)
+
+            src_str = f"{src}" + (f" ({src_ip})" if src_ip else "")
+            dst_str = f"{dst}" + (f" ({dst_ip})" if dst_ip else "")
+            detail = f"  [{action}] {proto} {ports}  {src_str} -> {dst_str}"
+            name = p0.get("name", "")
+            return f"  1x  {name}\n{detail}"
+
+        if sig.startswith("DST|"):
+            return f"{len(pols):>3}x  [{action}] {proto} {ports} to {dst}"
         return f"{len(pols):>3}x  [{action}] {proto} {ports} from {src}"
 
     choices = [_choice_label(sig, pols) for sig, pols in candidates]
